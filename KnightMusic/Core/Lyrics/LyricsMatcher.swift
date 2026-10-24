@@ -104,7 +104,7 @@ struct LrcRedSearch: Decodable, Sendable {
 
 /// Lyrics providers wrap their document in JSON (`{"ttml": "…"}`) or return it bare; errors come back as
 /// JSON too. This digs the document out, or returns nil for an error or an empty answer.
-enum LyricsPayload {
+enum LyricsEnvelope {
     private static let contentKeys = ["ttml", "ttmlContent", "lyrics", "syncedLyrics", "lrc", "content", "text", "plainLyrics", "data", "result"]
 
     static func unwrap(_ data: Data) -> String? {

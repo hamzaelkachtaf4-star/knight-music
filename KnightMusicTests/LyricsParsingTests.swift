@@ -81,13 +81,13 @@ final class LyricsParsingTests: XCTestCase {
     // MARK: Provider payloads & matching
 
     func testBetterLyricsWrapper() throws {
-        let ttml = try XCTUnwrap(LyricsPayload.unwrap(try Fixture.data("lyrics_betterlyrics.json")))
+        let ttml = try XCTUnwrap(LyricsEnvelope.unwrap(try Fixture.data("lyrics_betterlyrics.json")))
         let doc = try XCTUnwrap(TtmlParser.parse(ttml))
         XCTAssertEqual(doc.timing, .word)
         XCTAssertEqual(doc.lines.first?.text, "Hello world")
-        XCTAssertNil(LyricsPayload.unwrap(Data(#"{"error":"API key required"}"#.utf8)))
-        XCTAssertNil(LyricsPayload.unwrap(Data()))
-        XCTAssertEqual(LyricsPayload.unwrap(Data("<tt></tt>".utf8)), "<tt></tt>")
+        XCTAssertNil(LyricsEnvelope.unwrap(Data(#"{"error":"API key required"}"#.utf8)))
+        XCTAssertNil(LyricsEnvelope.unwrap(Data()))
+        XCTAssertEqual(LyricsEnvelope.unwrap(Data("<tt></tt>".utf8)), "<tt></tt>")
     }
 
     func testLrcRedPicksSameRecording() throws {
