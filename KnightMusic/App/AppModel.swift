@@ -195,6 +195,7 @@ final class AppModel {
     /// Pull-to-refresh. Safe to call from `.refreshable`: view cancellation doesn't cancel the sync.
     func pullToRefresh() async {
         if isStandalone {
+            await youtube.syncLibraryPlaylists()
             await youtube.loadHome(force: true)
         } else {
             await refresh()
@@ -400,6 +401,7 @@ final class AppModel {
         if !isStandalone && activeAccount == nil { startStandalone() }
         Task {
             await refreshYouTubeAccount()
+            await youtube.syncLibraryPlaylists()
             await youtube.loadHome(force: true)
         }
     }

@@ -51,14 +51,14 @@ final class YouTubeLibrary {
     /// Writes the tracks into the mirror (keeping stars and play counts) and returns them as playable songs.
     @discardableResult
     func songsForPlayback(_ tracks: [YTTrack]) async -> [Song] {
-        let fresh = tracks.filter { !$0.isVideo }.map(YouTubeMapping.song)
+        let fresh = tracks.map(YouTubeMapping.song)
         return await store(songs: fresh)
     }
 
     /// YouTube Music's radio after `song`, stored so the queue survives a relaunch.
     func radio(after song: Song, count: Int) async throws -> [Song] {
         guard let videoId = YouTubeID.raw(song.id) else { return [] }
-        let tracks = try await client.radio(after: videoId).filter { $0.videoId != videoId && !$0.isVideo }
+        let tracks = try await client.radio(after: videoId).filter { $0.videoId != videoId }
         return await store(songs: Array(tracks.prefix(count)).map(YouTubeMapping.song))
     }
 
@@ -148,11 +148,31 @@ final class YouTubeLibrary {
         defer { refreshing.remove(id) }
         do {
             let page = try await client.playlist(browseId)
-            let songs = await store(songs: page.tracks.filter { !$0.isVideo }.map(YouTubeMapping.song))
+            let songs = await store(songs: page.tracks.map(YouTubeMapping.song))
             try await database.storePlaylist(YouTubeMapping.playlist(page), songs: songs)
             await database.setStateValue(String(Date().timeIntervalSince1970), for: Self.stateKey(id))
         } catch {
             report(error, "Couldn’t load this playlist from YouTube Music")
+        }
+    }
+
+    // MARK: Library Playlists
+
+    /// Imports the signed-in user's saved YouTube Music playlists into the local mirror.
+    func syncLibraryPlaylists() async {
+        guard let database, YouTubeSession.shared.isSignedIn else { return }
+        do {
+            let items = try await client.libraryPlaylists()
+            try await database.pool.write { db in
+                for item in items {
+                    let fresh = YouTubeMapping.playlist(item)
+                    if try Playlist.fetchOne(db, key: fresh.id) == nil {
+                        try fresh.insert(db)
+                    }
+                }
+            }
+        } catch {
+            Log.network.warning("YouTube library playlists failed: \(error.localizedDescription)")
         }
     }
 

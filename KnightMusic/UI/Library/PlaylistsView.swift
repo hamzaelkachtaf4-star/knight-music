@@ -74,6 +74,11 @@ struct PlaylistsView: View {
         .navigationTitle("Playlists")
         .searchable(text: $searchText, prompt: "Search in Playlists")
         .refreshable { await app.pullToRefresh() }
+        .task {
+            if app.isStandalone && app.isYouTubeSignedIn {
+                await app.pullToRefresh()
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if hermes?.settings.isConfigured == true {
