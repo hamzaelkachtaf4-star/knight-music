@@ -35,7 +35,8 @@ struct SongRow<MenuContent: View>: View {
 
     init(song: Song, showsArtwork: Bool = true, isPlaying: Bool = false, isPaused: Bool = false,
          isDownloaded: Bool = false, @ViewBuilder menu: () -> MenuContent) {
-        self.init(title: song.title, subtitle: song.artist, duration: song.durationSeconds,
+        // An unknown length (some YouTube rows don't state one) shows nothing rather than "0:00".
+        self.init(title: song.title, subtitle: song.artist, duration: song.durationSeconds > 0 ? song.durationSeconds : nil,
                   leading: showsArtwork ? .artwork(song.coverArt) : .trackNumber(song.track),
                   isPlaying: isPlaying, isPaused: isPaused, isDownloaded: isDownloaded, menu: menu)
     }

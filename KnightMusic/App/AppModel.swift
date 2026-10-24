@@ -368,6 +368,8 @@ final class AppModel {
     func startStandalone() {
         standaloneEnabled = true
         guard activeAccount == nil else { return }
+        // A queue left from a server library can't play here.
+        if player.order.contains(where: { !YouTubeID.isYouTube($0.song.id) }) { player.clearPlayback() }
         activateStandalone()
     }
 
