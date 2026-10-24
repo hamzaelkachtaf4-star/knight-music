@@ -14,8 +14,16 @@ struct ArtistDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    @Environment(YouTubeLibrary.self) private var youtube
     @State private var artistInfo: ArtistInfo?
     @State private var isBioExpanded = false
+    /// A YouTube artist is fetched into the mirror when opened; until then it shows as loading, not missing.
+    @State private var isFetching: Bool
+
+    init(artistId: String) {
+        self.artistId = artistId
+        _isFetching = State(initialValue: YouTubeID.isYouTube(artistId))
+    }
 
     var body: some View {
         let artistQuery = library.artist(id: artistId)
@@ -35,13 +43,15 @@ struct ArtistDetailView: View {
                     allSongs: allSongsQuery.value,
                     allArtists: allArtistsQuery.value
                 )
+            } else if isFetching {
+                skeletonView
             } else {
                 EmptyStateView(
                     title: "Artist Not Found",
                     systemImage: "person.crop.circle",
-                    message: "This artist is not available in your library.",
-                    actionTitle: "Sync Now",
-                    action: { Task { await app.pullToRefresh() } }
+                    message: YouTubeID.isYouTube(artistId) ? "YouTube Music didn’t return this artist." : "This artist is not available in your library.",
+                    actionTitle: YouTubeID.isYouTube(artistId) ? "Try Again" : "Sync Now",
+                    action: { Task { await refresh() } }
                 )
             }
         }
@@ -50,8 +60,13 @@ struct ArtistDetailView: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .libraryActivity("artist", id: artistId, title: artistQuery.value?.name)
-        .refreshable { await app.pullToRefresh() }
+        .refreshable { await refresh() }
         .task(id: artistId) {
+            if YouTubeID.isYouTube(artistId) {
+                isFetching = true
+                await youtube.ensureArtist(artistId)
+                isFetching = false
+            }
             artistInfo = await library.artistInfo(artistId: artistId)
         }
         .observing(artistQuery)
@@ -453,6 +468,17 @@ struct ArtistDetailView: View {
 
                 SkeletonRowList(count: 5)
             }
+        }
+    }
+}
+
+extension ArtistDetailView {
+    fileprivate func refresh() async {
+        if YouTubeID.isYouTube(artistId) {
+            await youtube.ensureArtist(artistId, force: true)
+            artistInfo = await library.artistInfo(artistId: artistId)
+        } else {
+            await app.pullToRefresh()
         }
     }
 }

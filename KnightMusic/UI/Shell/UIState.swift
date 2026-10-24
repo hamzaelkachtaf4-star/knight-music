@@ -20,6 +20,8 @@ final class UIState {
     /// Set from anywhere (including the full player, which has no NavigationStack); the shell
     /// dismisses the player and pushes it onto the visible tab.
     var pendingRoute: Route?
+    /// Text Search should show when it next appears (screenshot mode).
+    var pendingSearch: String?
     /// Song whose info sheet is showing (see `SongInfoPresenter`).
     var songInfo: Song?
     /// Songs being added to a playlist (see `SongInfoPresenter`).

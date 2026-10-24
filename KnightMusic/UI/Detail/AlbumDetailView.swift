@@ -11,7 +11,15 @@ struct AlbumDetailView: View {
     @Environment(UIState.self) private var ui
     @Environment(HermesService.self) private var hermes: HermesService?
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(YouTubeLibrary.self) private var youtube
     @State private var selection = SongSelection()
+    /// A YouTube album is fetched into the mirror when opened; until then it shows as loading, not missing.
+    @State private var isFetching: Bool
+
+    init(albumId: String) {
+        self.albumId = albumId
+        _isFetching = State(initialValue: YouTubeID.isYouTube(albumId))
+    }
 
     var body: some View {
         let albumQuery = library.album(id: albumId)
@@ -24,23 +32,39 @@ struct AlbumDetailView: View {
                 let moreAlbumsQuery = library.albums(artistId: album.artistId ?? "")
                 albumContentView(album: album, songs: content.songs, moreAlbumsQuery: moreAlbumsQuery)
                     .observing(moreAlbumsQuery)
+            } else if isFetching {
+                skeletonView
             } else {
                 EmptyStateView(
                     title: "Album Not Found",
                     systemImage: "opticaldisc",
-                    message: "This album is not available in your library.",
-                    actionTitle: "Sync Now",
-                    action: { Task { await app.pullToRefresh() } }
+                    message: YouTubeID.isYouTube(albumId) ? "YouTube Music didn’t return this album." : "This album is not available in your library.",
+                    actionTitle: YouTubeID.isYouTube(albumId) ? "Try Again" : "Sync Now",
+                    action: { Task { await refresh() } }
                 )
             }
+        }
+        .task(id: albumId) {
+            guard YouTubeID.isYouTube(albumId) else { return }
+            isFetching = true
+            await youtube.ensureAlbum(albumId)
+            isFetching = false
         }
         .background(Theme.background.ignoresSafeArea())
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .libraryActivity("album", id: albumId, title: content.album?.name)
-        .refreshable { await app.pullToRefresh() }
+        .refreshable { await refresh() }
         .observing(albumQuery)
+    }
+
+    private func refresh() async {
+        if YouTubeID.isYouTube(albumId) {
+            await youtube.ensureAlbum(albumId, force: true)
+        } else {
+            await app.pullToRefresh()
+        }
     }
 
     // MARK: - Album Content

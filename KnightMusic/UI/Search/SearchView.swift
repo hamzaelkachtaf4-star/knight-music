@@ -2,6 +2,7 @@ import SwiftUI
 import GRDB
 
 struct SearchView: View {
+    @Environment(AppModel.self) private var app
     @Environment(PlayerEngine.self) private var player
     @Environment(LibraryRepository.self) private var library
     @Environment(DownloadManager.self) private var downloads
@@ -14,6 +15,16 @@ struct SearchView: View {
     @State private var isSearching = false
     @State private var recentSearches: [String] = []
     @State private var scope: SearchScope = .top
+    /// nil until the user picks: YouTube Music on the on-device library, the server library otherwise.
+    @State private var chosenSource: SearchSource?
+
+    enum SearchSource: String, CaseIterable, Identifiable {
+        case youTube = "YouTube Music"
+        case library = "Your Library"
+        var id: String { rawValue }
+    }
+
+    private var source: SearchSource { chosenSource ?? (app.isStandalone ? .youTube : .library) }
 
     enum SearchScope: String, CaseIterable, Identifiable {
         case top = "Top Results"
@@ -32,6 +43,13 @@ struct SearchView: View {
 
             if trimmed.isEmpty {
                 emptyQueryView
+            } else if source == .youTube {
+                if debouncedQuery.isEmpty {
+                    SkeletonRowList(count: 6)
+                        .padding(.top, 16)
+                } else {
+                    YouTubeSearchResults(query: debouncedQuery, scope: $scope, onOpen: { addRecentSearch(debouncedQuery) })
+                }
             } else if let results = searchResults {
                 if isEmpty(results, playlists: matchedPlaylists) && !isSearching {
                     VStack(spacing: 24) {
@@ -56,6 +74,16 @@ struct SearchView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Picker("Search in", selection: Binding(get: { source }, set: { chosenSource = $0 })) {
+                    ForEach(SearchSource.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, Theme.margin)
+                .padding(.vertical, 8)
+            }
+        }
         .background(Theme.background.ignoresSafeArea())
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.large)
@@ -66,12 +94,17 @@ struct SearchView: View {
             }
         }
         .sensoryFeedback(.selection, trigger: scope)
+        .sensoryFeedback(.selection, trigger: chosenSource)
         .observing(playlistsQuery)
         .onSubmit(of: .search) {
             addRecentSearch(query)
         }
         .onAppear {
             loadRecentSearches()
+            if let pending = ui?.pendingSearch {
+                ui?.pendingSearch = nil
+                query = pending
+            }
         }
         .task(id: query) {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)

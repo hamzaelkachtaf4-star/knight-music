@@ -35,7 +35,7 @@ struct HomeView: View {
 
                 if !newest.isLoaded && !recent.isLoaded && !counts.isLoaded {
                     loadingSkeletons
-                } else if counts.isLoaded && counts.value.albums == 0 && counts.value.songs == 0 && !app.syncStatus.isSyncing {
+                } else if counts.isLoaded && counts.value.albums == 0 && counts.value.songs == 0 && !app.syncStatus.isSyncing && !app.isStandalone {
                     emptyLibraryState
                 } else {
                     if !topPicks.value.isEmpty {
@@ -46,6 +46,10 @@ struct HomeView: View {
 
                     if !continueListening.value.isEmpty {
                         SongColumnsShelf(title: "Continue Listening", songs: continueListening.value, route: .songList(.recentlyPlayed))
+                    }
+
+                    if app.isStandalone {
+                        YouTubeHomeShelves()
                     }
 
                     if !recent.value.isEmpty {

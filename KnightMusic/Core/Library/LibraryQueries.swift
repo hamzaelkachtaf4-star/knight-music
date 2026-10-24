@@ -23,16 +23,37 @@ enum LibraryQueries {
 
     private static func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    // MARK: - Library membership
+
+    /// YouTube rows are a cache of what was browsed or searched. They count as library only once the user made
+    /// them theirs: liked, played, put in one of their playlists, or downloaded. Server rows always count.
+    private static let keptYouTubeSong = """
+        (song.starred IS NOT NULL OR song.playCount > 0
+         OR song.id IN (SELECT songId FROM playlistEntry WHERE playlistId NOT LIKE 'yt:%' OR playlistId LIKE 'yt:local-%')
+         OR song.id IN (SELECT songId FROM download WHERE state = 'completed'))
+        """
+    static let songInLibrary = "(song.id NOT LIKE 'yt:%' OR \(keptYouTubeSong))"
+    static let albumInLibrary = """
+        (album.id NOT LIKE 'yt:%' OR album.starred IS NOT NULL
+         OR album.id IN (SELECT song.albumId FROM song WHERE song.albumId LIKE 'yt:%' AND \(keptYouTubeSong)))
+        """
+    static let artistInLibrary = """
+        (artist.id NOT LIKE 'yt:%' OR artist.starred IS NOT NULL
+         OR artist.id IN (SELECT song.artistId FROM song WHERE song.artistId LIKE 'yt:%' AND \(keptYouTubeSong)))
+        """
+    /// Playlists imported from YouTube are pages to browse, not the user's own lists.
+    static let playlistInLibrary = "(playlist.id NOT LIKE 'yt:%' OR playlist.id LIKE 'yt:local-%')"
+
     // MARK: - Artists
 
     static func artists(_ db: Database, search: String) throws -> [Artist] {
         let q = trimmed(search)
         if q.isEmpty {
-            return try Artist.fetchAll(db, sql: "SELECT * FROM artist ORDER BY name COLLATE NOCASE")
+            return try Artist.fetchAll(db, sql: "SELECT * FROM artist WHERE \(artistInLibrary) ORDER BY name COLLATE NOCASE")
         }
         return try Artist.fetchAll(
             db,
-            sql: "SELECT * FROM artist WHERE name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE",
+            sql: "SELECT * FROM artist WHERE name LIKE ? ESCAPE '\\' AND \(artistInLibrary) ORDER BY name COLLATE NOCASE",
             arguments: [likePattern(q)]
         )
     }
@@ -60,7 +81,7 @@ enum LibraryQueries {
 
     static func albums(_ db: Database, sort: AlbumSort, search: String, limit: Int?) throws -> [Album] {
         let spec = albumOrder(sort)
-        var clauses: [String] = []
+        var clauses: [String] = [albumInLibrary]
         var args: [(any DatabaseValueConvertible)?] = []
         if !spec.where.isEmpty { clauses.append(spec.where) }
         let q = trimmed(search)
@@ -138,7 +159,7 @@ enum LibraryQueries {
 
     static func songs(_ db: Database, sort: SongSort, search: String, limit: Int?) throws -> [Song] {
         let spec = songOrder(sort)
-        var clauses: [String] = []
+        var clauses: [String] = [songInLibrary]
         var args: [(any DatabaseValueConvertible)?] = []
         if !spec.where.isEmpty { clauses.append(spec.where) }
         let q = trimmed(search)
@@ -224,7 +245,7 @@ enum LibraryQueries {
     // MARK: - Playlists, genres, radio
 
     static func playlists(_ db: Database) throws -> [Playlist] {
-        try Playlist.fetchAll(db, sql: "SELECT * FROM playlist ORDER BY name COLLATE NOCASE")
+        try Playlist.fetchAll(db, sql: "SELECT * FROM playlist WHERE \(playlistInLibrary) ORDER BY name COLLATE NOCASE")
     }
 
     static func playlist(_ db: Database, id: String) throws -> Playlist? {
@@ -254,10 +275,10 @@ enum LibraryQueries {
 
     static func counts(_ db: Database) throws -> LibraryCounts {
         LibraryCounts(
-            artists: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM artist") ?? 0,
-            albums: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album") ?? 0,
-            songs: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM song") ?? 0,
-            playlists: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist") ?? 0
+            artists: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM artist WHERE \(artistInLibrary)") ?? 0,
+            albums: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM album WHERE \(albumInLibrary)") ?? 0,
+            songs: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM song WHERE \(songInLibrary)") ?? 0,
+            playlists: try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM playlist WHERE \(playlistInLibrary)") ?? 0
         )
     }
 
@@ -274,17 +295,17 @@ enum LibraryQueries {
         if let match {
             results.artists = try Artist.fetchAll(
                 db,
-                sql: "SELECT artist.* FROM artist JOIN artistFts ON artistFts.rowid = artist.rowid WHERE artistFts MATCH ? ORDER BY bm25(artistFts) LIMIT ?",
+                sql: "SELECT artist.* FROM artist JOIN artistFts ON artistFts.rowid = artist.rowid WHERE artistFts MATCH ? AND \(artistInLibrary) ORDER BY bm25(artistFts) LIMIT ?",
                 arguments: [match, limit]
             )
             results.albums = try Album.fetchAll(
                 db,
-                sql: "SELECT album.* FROM album JOIN albumFts ON albumFts.rowid = album.rowid WHERE albumFts MATCH ? ORDER BY bm25(albumFts) LIMIT ?",
+                sql: "SELECT album.* FROM album JOIN albumFts ON albumFts.rowid = album.rowid WHERE albumFts MATCH ? AND \(albumInLibrary) ORDER BY bm25(albumFts) LIMIT ?",
                 arguments: [match, limit]
             )
             results.songs = try Song.fetchAll(
                 db,
-                sql: "SELECT song.* FROM song JOIN songFts ON songFts.rowid = song.rowid WHERE songFts MATCH ? ORDER BY bm25(songFts) LIMIT ?",
+                sql: "SELECT song.* FROM song JOIN songFts ON songFts.rowid = song.rowid WHERE songFts MATCH ? AND \(songInLibrary) ORDER BY bm25(songFts) LIMIT ?",
                 arguments: [match, limit]
             )
         }
@@ -292,7 +313,7 @@ enum LibraryQueries {
         if results.artists.count < limit {
             let more = try Artist.fetchAll(
                 db,
-                sql: "SELECT * FROM artist WHERE name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT ?",
+                sql: "SELECT * FROM artist WHERE name LIKE ? ESCAPE '\\' AND \(artistInLibrary) ORDER BY name COLLATE NOCASE LIMIT ?",
                 arguments: [like, limit]
             )
             let have = Set(results.artists.map(\.id))
@@ -301,7 +322,7 @@ enum LibraryQueries {
         if results.albums.count < limit {
             let more = try Album.fetchAll(
                 db,
-                sql: "SELECT * FROM album WHERE name LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT ?",
+                sql: "SELECT * FROM album WHERE (name LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\') AND \(albumInLibrary) ORDER BY name COLLATE NOCASE LIMIT ?",
                 arguments: [like, like, limit]
             )
             let have = Set(results.albums.map(\.id))
@@ -310,7 +331,7 @@ enum LibraryQueries {
         if results.songs.count < limit {
             let more = try Song.fetchAll(
                 db,
-                sql: "SELECT * FROM song WHERE title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' ORDER BY title COLLATE NOCASE LIMIT ?",
+                sql: "SELECT * FROM song WHERE (title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\') AND \(songInLibrary) ORDER BY title COLLATE NOCASE LIMIT ?",
                 arguments: [like, like, like, limit]
             )
             let have = Set(results.songs.map(\.id))

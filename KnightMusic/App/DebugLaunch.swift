@@ -4,18 +4,27 @@ import SwiftUI
 
 /// Screenshot mode for CI (scripts/screens.sh): `-KMDemo YES -KMScreen <name>`.
 /// Logs into demo.navidrome.org, waits for the first sync and exposes the requested screen. Inert in normal launches.
+/// `yt…` screens use the on-device YouTube Music library instead (they run last: they sign the demo out).
 enum DebugLaunch {
     static var isDemo: Bool { UserDefaults.standard.bool(forKey: "KMDemo") }
     static var screen: String? { UserDefaults.standard.string(forKey: "KMScreen") }
     static let demoServer = URL(string: "https://demo.navidrome.org")!
     static let demoUser = "demo"
     static let demoPassword = "demo"
+    static let demoYouTubeAlbum = "yt:MPREb_K8qWMWVqXGi"
+    static let demoYouTubeArtist = "yt:UCRr1xG_2WIDs18a6cIiCxeA"
 
     /// Returns true if it handled startup (login + sync), so the caller skips its normal refresh.
     @MainActor @discardableResult
     static func applyIfNeeded(_ app: AppModel) async -> Bool {
         guard isDemo else { return false }
         app.debugScreen = screen
+        if screen?.hasPrefix("yt") == true {
+            if app.activeAccount != nil { app.logout() }
+            app.startStandalone()
+            await app.youtube.loadHome()
+            return true
+        }
         if app.activeAccount == nil {
             do {
                 try await app.login(name: "Navidrome Demo", addresses: [demoServer], username: demoUser, password: demoPassword)
@@ -140,6 +149,19 @@ enum DebugLaunch {
         case "onboarding":
             // Handled in RootView by presenting LoginView regardless of session
             break
+        case "ythome":
+            ui.selectedTab = .home
+        case "ytsearch":
+            ui.pendingSearch = "daft punk"
+            ui.selectedTab = .search
+        case "ytalbum":
+            await app.youtube.ensureAlbum(demoYouTubeAlbum)
+            ui.selectedTab = .home
+            nav.home.append(Route.album(demoYouTubeAlbum))
+        case "ytartist":
+            await app.youtube.ensureArtist(demoYouTubeArtist)
+            ui.selectedTab = .home
+            nav.home.append(Route.artist(demoYouTubeArtist))
         default:
             break
         }

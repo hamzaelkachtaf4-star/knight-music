@@ -16,6 +16,19 @@ struct PlaylistDetailView: View {
     @State private var showingRenameAlert = false
     @State private var newPlaylistName = ""
     @State private var showingDeleteConfirmation = false
+    @Environment(YouTubeLibrary.self) private var youtube
+    /// A YouTube playlist is fetched into the mirror when opened; until then it shows as loading, not missing.
+    @State private var isFetching: Bool
+
+    init(playlistId: String) {
+        self.playlistId = playlistId
+        _isFetching = State(initialValue: YouTubeID.isYouTube(playlistId) && !YouTubeID.isLocalPlaylist(playlistId))
+    }
+
+    /// Imported from YouTube Music: browsed, played and copied from, but not edited.
+    private var isYouTubeImport: Bool {
+        YouTubeID.isYouTube(playlistId) && !YouTubeID.isLocalPlaylist(playlistId)
+    }
 
     /// Keeps this playlist downloaded, including songs added later (see `AutoDownloader`).
     private var autoDownloadBinding: Binding<Bool> {
@@ -40,21 +53,29 @@ struct PlaylistDetailView: View {
                 skeletonView
             } else if let playlist = playlistQuery.value {
                 playlistContentView(playlist: playlist, songs: songsQuery.value)
+            } else if isFetching {
+                skeletonView
             } else {
                 EmptyStateView(
                     title: "Playlist Not Found",
                     systemImage: "music.note.list",
-                    message: "This playlist is not available in your library.",
-                    actionTitle: "Sync Now",
-                    action: { Task { await app.pullToRefresh() } }
+                    message: isYouTubeImport ? "YouTube Music didn’t return this playlist." : "This playlist is not available in your library.",
+                    actionTitle: isYouTubeImport ? "Try Again" : "Sync Now",
+                    action: { Task { await refresh() } }
                 )
             }
+        }
+        .task(id: playlistId) {
+            guard isYouTubeImport else { return }
+            isFetching = true
+            await youtube.ensurePlaylist(playlistId)
+            isFetching = false
         }
         .background(Theme.background.ignoresSafeArea())
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.hidden, for: .navigationBar)
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .refreshable { await app.pullToRefresh() }
+        .refreshable { await refresh() }
         .observing(playlistQuery)
         .observing(songsQuery)
         .observing(playlists)
@@ -309,18 +330,22 @@ struct PlaylistDetailView: View {
     @ToolbarContentBuilder
     private func toolbarItems(playlist: Playlist, songs: [Song]) -> some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
-            Button(editMode == .active ? "Done" : "Edit") {
-                withAnimation {
-                    editMode = editMode == .active ? .inactive : .active
+            if !isYouTubeImport {
+                Button(editMode == .active ? "Done" : "Edit") {
+                    withAnimation {
+                        editMode = editMode == .active ? .inactive : .active
+                    }
                 }
             }
 
             Menu {
-                Button {
-                    newPlaylistName = playlist.name
-                    showingRenameAlert = true
-                } label: {
-                    Label("Rename", systemImage: "pencil")
+                if !isYouTubeImport {
+                    Button {
+                        newPlaylistName = playlist.name
+                        showingRenameAlert = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
                 }
 
                 Button {
@@ -379,4 +404,14 @@ private struct PlaylistItem: Identifiable {
     let id: String
     let index: Int
     let song: Song
+}
+
+extension PlaylistDetailView {
+    fileprivate func refresh() async {
+        if isYouTubeImport {
+            await youtube.ensurePlaylist(playlistId, force: true)
+        } else {
+            await app.pullToRefresh()
+        }
+    }
 }

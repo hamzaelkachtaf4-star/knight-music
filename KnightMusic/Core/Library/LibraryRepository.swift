@@ -313,7 +313,8 @@ final class LibraryRepository {
         }
         let stored: ArtistInfo? = cached.flatMap { $0.json.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(ArtistInfo.self, from: $0) }
         if let stored, let cached, Date().timeIntervalSince(cached.fetchedAt) < 14 * 86400 || isOfflineProvider() { return stored }
-        guard let client, !isOfflineProvider() else { return stored }
+        // YouTube artists' "about" text is written by YouTubeLibrary.ensureArtist.
+        guard let client, !YouTubeID.isYouTube(artistId), !isOfflineProvider() else { return stored }
         do {
             let info = try await client.getArtistInfo2(id: artistId)
             do {

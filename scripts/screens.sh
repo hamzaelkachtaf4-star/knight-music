@@ -6,7 +6,8 @@
 set -uo pipefail
 APP="$1"; OUT="$2"; mkdir -p "$OUT"
 BUNDLE=com.knightabdo.knightmusic
-SCREENS=(home search artists albums songs playlists album artist player lyrics queue settings server downloads onboarding knight)
+# yt* screens run last: they sign the demo server out and use the on-device YouTube Music library.
+SCREENS=(home search artists albums songs playlists album artist player lyrics queue settings server downloads onboarding knight ythome ytsearch ytalbum ytartist)
 LANDSCAPE=(home albums artists album player)   # iPad only; Simulator.app rotates the device (apps can't on iPadOS 26)
 
 
