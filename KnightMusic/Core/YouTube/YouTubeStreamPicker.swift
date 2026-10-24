@@ -84,6 +84,25 @@ enum YouTubeStreamPicker {
         return (name, version)
     }
 
+    /// Exclusion bucket for a URL refused mid-playback: the client/version that minted a googlevideo file, the
+    /// IOS HLS tier for manifests, the public-instance fallback for anything else.
+    static let hlsKey = "IOS/HLS"
+    static let fallbackKey = "fallback"
+
+    static func exclusionKey(of url: URL) -> String {
+        if url.host == "manifest.googlevideo.com" || url.pathExtension == "m3u8" { return hlsKey }
+        guard url.host?.hasSuffix("googlevideo.com") == true, let minted = mintingClient(of: url) else { return fallbackKey }
+        return minted.version.map { "\(minted.name)/\($0)" } ?? minted.name
+    }
+
+    /// When a resolved stream stops being trusted. Measured on this device's clock from the response's own
+    /// `expiresInSeconds` (the URL's `expire` is server time, and a wrong device clock would make every stream
+    /// look stale), less five minutes, capped at `ttl`.
+    static func expiry(of url: URL, expiresInSeconds: Int?, now: Date = Date(), ttl: TimeInterval) -> Date {
+        guard let seconds = expiresInSeconds, seconds > 0 else { return now.addingTimeInterval(ttl) }
+        return now.addingTimeInterval(min(ttl, max(TimeInterval(seconds) - 300, 0)))
+    }
+
     /// Only refusals about the song itself (age gate, region, takedown, private) are remembered as verdicts.
     /// "Please sign in" and bot checks are about this client or this network right now, and must not stick.
     static func permanentReason(_ response: YTPlayerResponse) -> String? {

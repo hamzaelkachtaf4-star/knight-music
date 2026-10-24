@@ -39,7 +39,11 @@ swiftc -parse-as-library -emit-library -emit-module -module-name XCTest \
   echo "  print(\"\\(ran) tests, \\(failed) failed\"); exit(failed == 0 ? 0 : 1)"
   echo "} }"
 } > "$OUT/runner.swift"
-swiftc -parse-as-library -I "$OUT" -L "$OUT" -lXCTest -Xlinker -rpath -Xlinker "$PWD/$OUT" \
-  "${SOURCES[@]}" "${TESTS[@]}" "$OUT/runner.swift" -o "$OUT/run" 2>&1 | grep -v "warning:" || true
-[ -x "$OUT/run" ] || exit 1
+rm -f "$OUT/run"
+# A compile failure must fail the run, never fall back to an older binary.
+if ! swiftc -parse-as-library -I "$OUT" -L "$OUT" -lXCTest -Xlinker -rpath -Xlinker "$PWD/$OUT" \
+  "${SOURCES[@]}" "${TESTS[@]}" "$OUT/runner.swift" -o "$OUT/run" 2> "$OUT/compile.log"; then
+  grep -E "error" "$OUT/compile.log" | head -40
+  exit 1
+fi
 KM_FIXTURES="$PWD/KnightMusicTests/Fixtures" "$OUT/run"

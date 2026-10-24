@@ -41,6 +41,9 @@ final class StreamCache: @unchecked Sendable {
     private let maxConcurrent = 3
     private var fractions: [String: Double] = [:]
     private var lastReport: TimeInterval = 0
+    /// YouTube songs whose download just failed, and when: not queued again for a minute (AutoMix asks 4×/s).
+    private var failedAt: [String: Date] = [:]
+    private static let retryDelay: TimeInterval = 60
     /// Called (on any thread) whenever what is queued/downloading or its progress changes.
     var onActivity: (@Sendable ([CacheTransfer]) -> Void)?
 
@@ -140,6 +143,7 @@ final class StreamCache: @unchecked Sendable {
         lock.lock()
         limitBytes = max(limitMB, 0) * 1_048_576
         let already = index[songId] != nil || active[songId] != nil || queued.contains { $0.songId == songId }
+            || recentlyFailed(songId)
         if !already {
             queued.append(Job(songId: songId, url: url, quality: quality, ext: fileExtension))
         }
@@ -152,7 +156,7 @@ final class StreamCache: @unchecked Sendable {
     func prioritize(songId: String, url: URL, quality: StreamQuality, fileExtension: String, limitMB: Int) {
         lock.lock()
         limitBytes = max(limitMB, 0) * 1_048_576
-        if index[songId] == nil, active[songId] == nil {
+        if index[songId] == nil, active[songId] == nil, !recentlyFailed(songId) {
             queued.removeAll { $0.songId == songId }
             var job = Job(songId: songId, url: url, quality: quality, ext: fileExtension)
             job.urgent = true
@@ -243,6 +247,14 @@ final class StreamCache: @unchecked Sendable {
         report(force: true)
     }
 
+    /// Call with `lock` held.
+    private func recentlyFailed(_ songId: String) -> Bool {
+        guard let at = failedAt[songId] else { return false }
+        if Date().timeIntervalSince(at) < Self.retryDelay { return true }
+        failedAt[songId] = nil
+        return false
+    }
+
     private func run(_ job: Job) async {
         var request = URLRequest(url: job.url)
         request.networkServiceType = job.urgent ? .responsiveData : .background
@@ -253,7 +265,10 @@ final class StreamCache: @unchecked Sendable {
                     job.url, expectedLength: YouTubeStream.contentLength(of: job.url),
                     networkServiceType: request.networkServiceType,
                     progress: { [weak self] fraction in self?.progress(job.songId, fraction: fraction) })
-                try Task.checkCancellation()
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: tmp)
+                    throw CancellationError()
+                }
                 store(tmp: tmp, job: job)
             } else {
                 let (tmp, response) = try await session.download(for: request,
@@ -273,6 +288,14 @@ final class StreamCache: @unchecked Sendable {
         } catch let error as URLError where error.code == .cancelled {
         } catch {
             PlaybackLog.logger.error("Stream cache download failed for \(job.songId): \(error.localizedDescription)")
+            if let videoId = YouTubeID.raw(job.songId) {
+                lock.lock()
+                failedAt[job.songId] = Date()
+                lock.unlock()
+                if case YouTubeError.http(let code) = error, [403, 404, 410].contains(code) {
+                    YouTubeStreamResolver.shared.refused(job.url, videoId: videoId)
+                }
+            }
         }
         lock.lock()
         active[job.songId] = nil

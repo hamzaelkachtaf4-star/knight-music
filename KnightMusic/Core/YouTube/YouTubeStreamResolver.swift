@@ -20,7 +20,8 @@ final class YouTubeStreamResolver: @unchecked Sendable {
     private let probeSession: URLSession
     private let lock = NSLock()
     private var cache: [String: YouTubeStream] = [:]
-    private var inFlight: [String: Task<YouTubeStream, Error>] = [:]
+    /// Running resolutions and how many callers wait on each: when the last one gives up, the walk stops.
+    private var inFlight: [String: (task: Task<YouTubeStream, Error>, waiters: Int, token: UUID)] = [:]
     private var verdicts: [String: (reason: String, until: Date)] = [:]
     /// "ANDROID_VR/1.65.10" style keys refused mid-playback, per video, until a date.
     private var excluded: [String: [String: Date]] = [:]
@@ -54,22 +55,27 @@ final class YouTubeStreamResolver: @unchecked Sendable {
 
     /// Resolves (or joins the in-flight resolution of) `videoId`. Throws `YouTubeError` with a reason worth showing.
     func resolve(_ videoId: String) async throws -> YouTubeStream {
-        try await coalesced(videoId) { try await self.resolveUncached(videoId, progressiveOnly: false) }
+        if let cached = cachedStream(for: videoId) { return cached }
+        return try await coalesced(videoId, key: videoId) { try await self.resolveUncached(videoId, progressiveOnly: false) }
     }
 
-    /// A stream that can be saved as a file (downloads, crossfade cache): progressive only.
+    /// A stream that can be saved as a file (downloads, crossfade cache): progressive only. Coalesced apart from
+    /// playback's resolution, which may settle for HLS.
     func resolveDownloadable(_ videoId: String) async throws -> YouTubeStream {
         if let cached = cachedStream(for: videoId), cached.delivery == .progressive { return cached }
-        return try await coalesced(videoId) { try await self.resolveUncached(videoId, progressiveOnly: true) }
+        let stream = try await coalesced(videoId, key: "file:" + videoId) { try await self.resolveUncached(videoId, progressiveOnly: true) }
+        guard stream.delivery == .progressive else { throw YouTubeError.noStream }
+        return stream
     }
 
     /// googlevideo refused `url` mid-playback: forget it and keep its client away from this video for a while,
     /// so the retry moves on to the next tier instead of minting the same kind of URL again.
     func refused(_ url: URL, videoId: String) {
-        let key = Self.clientKey(of: url)
+        let key = YouTubeStreamPicker.exclusionKey(of: url)
         lock.withLock {
-            cache[videoId] = nil
-            if let key { excluded[videoId, default: [:]][key] = Date().addingTimeInterval(Self.exclusionTTL) }
+            // Only forget the cached stream if it is the one refused (a newer one may have replaced it).
+            if cache[videoId]?.url == url { cache[videoId] = nil }
+            excluded[videoId, default: [:]][key] = Date().addingTimeInterval(Self.exclusionTTL)
         }
     }
 
@@ -79,26 +85,46 @@ final class YouTubeStreamResolver: @unchecked Sendable {
 
     // MARK: Coalescing
 
-    private func coalesced(_ videoId: String, _ work: @escaping @Sendable () async throws -> YouTubeStream) async throws -> YouTubeStream {
-        if let cached = cachedStream(for: videoId) { return cached }
-        enum Next { case refused(String), join(Task<YouTubeStream, Error>), start(Task<YouTubeStream, Error>) }
+    private func coalesced(_ videoId: String, key: String,
+                           _ work: @escaping @Sendable () async throws -> YouTubeStream) async throws -> YouTubeStream {
+        enum Next { case refused(String), wait(Task<YouTubeStream, Error>) }
         let next: Next = lock.withLock {
             if let verdict = verdicts[videoId], verdict.until > Date() { return .refused(verdict.reason) }
-            if let running = inFlight[videoId] { return .join(running) }
-            let task = Task { try await work() }
-            inFlight[videoId] = task
-            return .start(task)
+            if let running = inFlight[key] {
+                inFlight[key]?.waiters += 1
+                return .wait(running.task)
+            }
+            let token = UUID()
+            let task = Task { () throws -> YouTubeStream in
+                defer {
+                    self.lock.withLock { if self.inFlight[key]?.token == token { self.inFlight[key] = nil } }
+                }
+                let stream = try await work()
+                // Never hand out a stream that is already too old to play: the caller would just ask again.
+                guard stream.isFresh else { throw YouTubeError.noStream }
+                self.remember(stream)
+                return stream
+            }
+            inFlight[key] = (task, 1, token)
+            return .wait(task)
         }
         switch next {
         case .refused(let reason):
             throw YouTubeError.unplayable(reason)
-        case .join(let running):
-            return try await running.value
-        case .start(let task):
-            defer { lock.withLock { inFlight[videoId] = nil } }
-            let stream = try await task.value
-            remember(stream)
-            return stream
+        case .wait(let task):
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                self.lock.withLock {
+                    guard let entry = self.inFlight[key], entry.task == task else { return }
+                    if entry.waiters <= 1 {
+                        self.inFlight[key] = nil
+                        task.cancel()
+                    } else {
+                        self.inFlight[key]?.waiters -= 1
+                    }
+                }
+            }
         }
     }
 
@@ -107,7 +133,8 @@ final class YouTubeStreamResolver: @unchecked Sendable {
     private func resolveUncached(_ videoId: String, progressiveOnly: Bool) async throws -> YouTubeStream {
         var reason: String?
         let skip = excludedClients(for: videoId)
-        for identity in Self.tiers where !skip.contains("\(identity.name)/\(identity.version)") {
+        for identity in Self.tiers where !skip.contains("\(identity.name)/\(identity.version)") && !skip.contains(identity.name) {
+            try Task.checkCancellation()
             do {
                 let response = try await client.player(videoId: videoId, as: identity)
                 guard response.isPlayable else {
@@ -118,7 +145,7 @@ final class YouTubeStreamResolver: @unchecked Sendable {
                       let url = format.url, await probe(url, length: format.contentLength) else { continue }
                 return YouTubeStream(videoId: videoId, url: url, delivery: .progressive, bitrate: format.bitrate,
                                      contentLength: format.contentLength,
-                                     expiresAt: Self.expiry(of: url, seconds: response.expiresInSeconds),
+                                     expiresAt: YouTubeStreamPicker.expiry(of: url, expiresInSeconds: response.expiresInSeconds, ttl: Self.cacheTTL),
                                      loudnessDb: format.loudnessDb ?? response.loudnessDb, source: identity.name)
             } catch is CancellationError {
                 throw CancellationError()
@@ -127,7 +154,8 @@ final class YouTubeStreamResolver: @unchecked Sendable {
             }
         }
 
-        if !progressiveOnly {
+        try Task.checkCancellation()
+        if !progressiveOnly, !skip.contains(YouTubeStreamPicker.hlsKey) {
             do {
                 let identity = YouTubeClient.PlayerIdentity.iOS
                 let response = try await client.player(videoId: videoId, as: identity)
@@ -137,7 +165,7 @@ final class YouTubeStreamResolver: @unchecked Sendable {
                     if let audio = YouTubeStreamPicker.hlsAudioPlaylist(fromMaster: text),
                        try await client.text(at: audio, userAgent: identity.userAgent).hasPrefix("#EXTM3U") {
                         return YouTubeStream(videoId: videoId, url: audio, delivery: .hls, bitrate: 128_000, contentLength: nil,
-                                             expiresAt: Self.expiry(of: master, seconds: response.expiresInSeconds),
+                                             expiresAt: YouTubeStreamPicker.expiry(of: master, expiresInSeconds: response.expiresInSeconds, ttl: Self.cacheTTL),
                                              loudnessDb: response.loudnessDb, source: identity.name)
                     }
                 }
@@ -148,7 +176,9 @@ final class YouTubeStreamResolver: @unchecked Sendable {
             }
         }
 
-        if let found = await fallback.audio(videoId: videoId), await probe(found.url, length: found.contentLength) {
+        try Task.checkCancellation()
+        if !skip.contains(YouTubeStreamPicker.fallbackKey),
+           let found = await fallback.audio(videoId: videoId), await probe(found.url, length: found.contentLength) {
             return YouTubeStream(videoId: videoId, url: found.url, delivery: .progressive, bitrate: found.bitrate,
                                  contentLength: found.contentLength, expiresAt: Date().addingTimeInterval(Self.cacheTTL),
                                  loudnessDb: nil, source: found.source)
@@ -200,26 +230,6 @@ final class YouTubeStreamResolver: @unchecked Sendable {
             excluded[videoId] = live.isEmpty ? nil : live
             return Set(live.keys)
         }
-    }
-
-    /// "ANDROID_VR/1.65.10" for the client that minted `url`; without a version, the first tier of that client.
-    static func clientKey(of url: URL) -> String? {
-        guard let minted = YouTubeStreamPicker.mintingClient(of: url) else { return nil }
-        if let version = minted.version { return "\(minted.name)/\(version)" }
-        return tiers.first { $0.name == minted.name }.map { "\($0.name)/\($0.version)" }
-    }
-
-    /// The earlier of the URL's own `expire` and our TTL.
-    private static func expiry(of url: URL, seconds: Int?) -> Date {
-        var limit = Date().addingTimeInterval(cacheTTL)
-        let fromQuery = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "expire" }?.value
-        let fromPath = url.absoluteString.firstMatch(of: #/\/expire\/(\d+)/#).map { String($0.output.1) }
-        if let raw = fromQuery ?? fromPath, let epoch = TimeInterval(raw) {
-            limit = min(limit, Date(timeIntervalSince1970: epoch).addingTimeInterval(-300))
-        } else if let seconds {
-            limit = min(limit, Date().addingTimeInterval(TimeInterval(seconds) - 300))
-        }
-        return limit
     }
 
     private static func permanentReason(_ response: YTPlayerResponse) -> String? {

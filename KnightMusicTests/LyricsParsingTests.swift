@@ -41,6 +41,17 @@ final class LyricsParsingTests: XCTestCase {
         XCTAssertNil(TtmlParser.milliseconds("abc"))
     }
 
+    func testHostileClockValuesNeverTrap() {
+        XCTAssertNil(TtmlParser.milliseconds("inf"))
+        XCTAssertNil(TtmlParser.milliseconds("nan"))
+        XCTAssertNil(TtmlParser.milliseconds("1e999"))
+        XCTAssertNil(TtmlParser.milliseconds("99999999999999999999"))
+        XCTAssertNil(TtmlParser.milliseconds("-1"))
+        XCTAssertNil(TtmlParser.milliseconds("infms"))
+        let doc = TtmlParser.parse(#"<tt><body><div><p begin="1e999" end="2">bad</p><p begin="1.5" end="2"><span begin="nan" end="inf">x</span></p><p begin="3" end="4">ok</p></div></body></tt>"#)
+        XCTAssertEqual(doc?.lines.map(\.text), ["x", "ok"])
+    }
+
     func testMalformedTTML() {
         XCTAssertNil(TtmlParser.parse(""))
         XCTAssertNil(TtmlParser.parse("<tt><body><p begin=\"1\">unclosed"))

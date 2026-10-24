@@ -58,6 +58,7 @@ final class AppModel {
         player = PlayerEngine()
         network.onChange = { [weak self] in self?.networkChanged() }
         library.isOfflineProvider = { [weak self] in self?.isOffline ?? false }
+        library.isInternetOfflineProvider = { [weak self] in self?.isInternetOffline ?? false }
         youtube.configure(library: library)
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.library.dropCaches() }
@@ -76,6 +77,15 @@ final class AppModel {
         switch settings.offlineMode {
         case .manual: return settings.manualOfflineEnabled
         case .automatic: return !network.isConnected || !serverReachable
+        }
+    }
+
+    /// No internet, or offline chosen by hand. Unlike `isOffline`, an unreachable server doesn't count:
+    /// YouTube Music works without it.
+    var isInternetOffline: Bool {
+        switch settings.offlineMode {
+        case .manual: return settings.manualOfflineEnabled
+        case .automatic: return !network.isConnected
         }
     }
 

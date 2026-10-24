@@ -38,6 +38,9 @@ struct PlaybackSettings: Equatable, Sendable {
     var replayGain: ReplayGainMode = .off
     var scrobblingEnabled: Bool = true
     var offlineMode: Bool = false
+    /// No internet (or offline chosen by hand), regardless of whether the Navidrome server answers. YouTube
+    /// playback, downloads and lyrics only care about this.
+    var internetOffline: Bool = false
     var streamCacheEnabled: Bool = true
     var streamCacheLimitMB: Int = 2048
     var serverQueueSyncEnabled: Bool = true
@@ -116,6 +119,7 @@ final class PlaybackServices: @unchecked Sendable {
     var settings: PlaybackSettings { settingsProvider() }
     var network: PlaybackNetworkStatus { networkProvider() }
     var isOffline: Bool { settings.offlineMode || network == .offline }
+    var isInternetOffline: Bool { settings.internetOffline || network == .offline }
 }
 
 /// Quality requested from the server for a stream (or transcoded download).

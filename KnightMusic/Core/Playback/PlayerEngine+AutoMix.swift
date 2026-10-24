@@ -545,7 +545,7 @@ extension PlayerEngine {
 
     /// Starts (or moves to the front) the download of the incoming song, minutes before its transition.
     func ensureLocal(_ song: Song) {
-        guard !isLocal(song), !services.isOffline else { return }
+        guard !isLocal(song), !(YouTubeID.isYouTube(song.id) ? services.isInternetOffline : services.isOffline) else { return }
         let quality = YouTubeID.isYouTube(song.id) ? StreamQuality.original : currentQuality()
         guard let url = streamURL(for: song, quality: quality) else { return }
         streamCache.prioritize(songId: song.id, url: url, quality: quality,

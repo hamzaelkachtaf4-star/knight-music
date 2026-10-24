@@ -15,6 +15,7 @@ final class LibraryRepository {
     @ObservationIgnored private var client: SubsonicClient?
     @ObservationIgnored private var syncEngine: SyncEngine?
     @ObservationIgnored var isOfflineProvider: () -> Bool = { false }
+    @ObservationIgnored var isInternetOfflineProvider: () -> Bool = { false }
     @ObservationIgnored var onSongStarChanged: ((String, Bool) -> Void)?
 
     @ObservationIgnored private var cache: [String: AnyObject] = [:]
@@ -259,18 +260,23 @@ final class LibraryRepository {
                 if lines.contains(where: \.synced) || age < 7 * 86400 || isOfflineProvider() { return lines }
             }
         }
-        guard !isOfflineProvider() else { return [] }
+        guard !isOfflineProvider() || !isInternetOfflineProvider() else { return [] }
 
         var found: [StructuredLyrics] = []
-        if let client, !YouTubeID.isYouTube(songId) {
+        // Only a complete answer is cached: a server error or a provider outage is asked again next time.
+        var cacheable = true
+        if client != nil, !YouTubeID.isYouTube(songId), isOfflineProvider() {
+            // The server's answer is unknown while it can't be reached: don't let an online one stick for a week.
+            cacheable = false
+        } else if let client, !YouTubeID.isYouTube(songId) {
             do {
                 found = try await client.getLyricsBySongId(id: songId).filter { !$0.line.isEmpty }
             } catch {
+                cacheable = false
                 Log.sync.warning("lyrics(\(songId)) from server failed: \(error.localizedDescription)")
             }
         }
-        var cacheable = true
-        if !found.contains(where: \.synced), let artist = song.artist, !artist.isEmpty {
+        if !found.contains(where: \.synced), !isInternetOfflineProvider(), let artist = song.artist, !artist.isEmpty {
             let seconds = song.duration ?? (durationHint > 0 ? Int(durationHint.rounded()) : nil)
             switch await LyricsService.shared.lyrics(title: song.title, artist: artist, album: song.album, durationSeconds: seconds) {
             case .found(let online):
@@ -279,7 +285,7 @@ final class LibraryRepository {
             case .notFound:
                 break
             case .unavailable:
-                cacheable = !found.isEmpty
+                cacheable = false
             }
         }
         if cacheable, let database, let data = try? JSONEncoder().encode(found), let json = String(data: data, encoding: .utf8) {
@@ -529,6 +535,10 @@ final class LibraryRepository {
         }
         if existing == nil, client == nil || songIds.contains(where: { YouTubeID.isYouTube($0) }) {
             return try await createLocalPlaylist(name: name, songIds: songIds)
+        }
+        guard !songIds.contains(where: { YouTubeID.isYouTube($0) }) else {
+            report(LibraryError.youTubeOnServer, "Could not update playlist")
+            throw LibraryError.youTubeOnServer
         }
         let client = try requireClient()
         let (playlist, songs) = try await client.createPlaylist(name: existing == nil ? name : nil,

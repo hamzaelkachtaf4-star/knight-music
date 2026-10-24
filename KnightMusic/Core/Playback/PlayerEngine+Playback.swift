@@ -23,7 +23,7 @@ extension PlayerEngine {
     func isPlayable(_ song: Song) -> Bool {
         if downloads?.localFileURL(for: song.id) != nil { return true }
         if streamCache.contains(song.id) { return true }
-        if YouTubeID.isYouTube(song.id) { return !services.isOffline }
+        if YouTubeID.isYouTube(song.id) { return !services.isInternetOffline }
         return !services.isOffline && services.urls != nil
     }
 
@@ -54,13 +54,13 @@ extension PlayerEngine {
             return ResolvedSource(url: url, kind: .cached, quality: q,
                                   description: AudioDescription.make(kind: .cached, song: song, quality: q))
         }
-        guard !services.isOffline else { return nil }
         if let videoId = YouTubeID.raw(song.id) {
-            guard let stream = YouTubeStreamResolver.shared.cachedStream(for: videoId) else { return nil }
+            guard !services.isInternetOffline, let stream = YouTubeStreamResolver.shared.cachedStream(for: videoId) else { return nil }
             var parts = ["Streaming", "AAC"]
             if stream.kbps > 0 { parts.append("\(stream.kbps) kbps") }
             return ResolvedSource(url: stream.url, kind: .streaming, quality: nil, description: parts.joined(separator: " \u{2022} "))
         }
+        guard !services.isOffline else { return nil }
         let q = currentQuality()
         guard let url = streamURL(for: song, quality: q) else { return nil }
         return ResolvedSource(url: url, kind: .streaming, quality: q,
@@ -340,7 +340,7 @@ extension PlayerEngine {
 
     func syncCache() {
         if settings.savesUpcomingLocally {
-            guard settings.streamCacheEnabled, !services.isOffline, currentRadio == nil,
+            guard settings.streamCacheEnabled, !cacheOffline, currentRadio == nil,
                   services.urls != nil || isStandaloneOrYouTubeQueue, currentIndex < order.count else {
                 // AutoMix still needs its incoming song as a local file when the stream cache is off.
                 // With AutoMix off nothing is saved ahead: pending background downloads are cancelled.
@@ -373,7 +373,7 @@ extension PlayerEngine {
             networkAllowed = (services.network == .wifi || services.network == .cellular)
         }
 
-        guard networkAllowed, settings.streamCacheEnabled, !services.isOffline, currentRadio == nil,
+        guard networkAllowed, settings.streamCacheEnabled, !cacheOffline, currentRadio == nil,
               services.urls != nil || isStandaloneOrYouTubeQueue else {
             let keep = plannedMix.map { Set([$0.to.id]) } ?? []
             streamCache.retainOnly(keep)
@@ -496,6 +496,8 @@ extension PlayerEngine {
         let delta = min(max(now - lastTickUptime, 0), 1)
         lastTickUptime = now
         guard !isScrubbing, seekTarget == nil else { return }
+        // Nothing is loaded while a YouTube song connects: keep the position it will start from.
+        if tracked == nil, youTubePendingEntry != nil { return }
         let t = time.seconds
         guard t.isFinite, t >= 0 else { return }
         currentTime = t
@@ -645,7 +647,9 @@ extension PlayerEngine {
         if p === nextPrepared {
             if p.resolved.kind == .cached {
                 streamCache.remove(songId: p.entry.song.id)
-            } else if let videoId = YouTubeID.raw(p.entry.song.id) {
+            } else if let videoId = YouTubeID.raw(p.entry.song.id), !retriedFromStream.contains(p.entry.id) {
+                // One fresh resolution (away from the refusing client); a second refusal skips the song.
+                retriedFromStream.insert(p.entry.id)
                 YouTubeStreamResolver.shared.refused(p.resolved.url, videoId: videoId)
             } else {
                 failedEntryIds.insert(p.entry.id)

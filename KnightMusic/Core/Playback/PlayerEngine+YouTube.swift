@@ -6,7 +6,7 @@ import Foundation
 extension PlayerEngine {
     /// True when `song` is a YouTube song with nothing local and no fresh stream yet.
     func needsYouTubeResolution(_ song: Song) -> Bool {
-        guard let videoId = YouTubeID.raw(song.id), !services.isOffline else { return false }
+        guard let videoId = YouTubeID.raw(song.id), !services.isInternetOffline else { return false }
         if downloads?.localFileURL(for: song.id) != nil || streamCache.contains(song.id) { return false }
         return YouTubeStreamResolver.shared.cachedStream(for: videoId) == nil
     }
@@ -15,7 +15,11 @@ extension PlayerEngine {
     /// Without `autoplay` (a restored or parked queue) nothing is fetched until the user presses play.
     func beginYouTubeResolution(_ entry: QueueEntry, index: Int, autoplay: Bool, startAt: TimeInterval) {
         guard let videoId = YouTubeID.raw(entry.song.id) else { return }
-        if youTubePendingEntry == entry.id, youTubeResolution != nil { return }
+        if youTubePendingEntry == entry.id, youTubeResolution != nil {
+            // Already connecting (e.g. pause then play meanwhile): just show it as playing again.
+            if autoplay { isPlaying = true; isBuffering = true }
+            return
+        }
         cancelYouTubeResolution()
         stopPlayer()
         scrobbler.end()
@@ -28,8 +32,14 @@ extension PlayerEngine {
                 guard let self, !Task.isCancelled, self.youTubePendingEntry == entry.id else { return }
                 self.youTubeResolution = nil
                 self.youTubePendingEntry = nil
+                // load() resolves from the cache; if the stream is somehow already stale, fail rather than loop.
+                guard YouTubeStreamResolver.shared.cachedStream(for: videoId) != nil else {
+                    self.youTubeResolutionFailed(entry, error: YouTubeError.noStream)
+                    return
+                }
                 guard let i = self.order.firstIndex(where: { $0.id == entry.id }) else { return }
-                self.load(index: i, autoplay: self.userWantsPlaying, startAt: startAt)
+                // `currentTime` carries any seek made while connecting (it starts as `startAt`).
+                self.load(index: i, autoplay: self.userWantsPlaying, startAt: self.currentTime)
             } catch {
                 guard let self, !Task.isCancelled, self.youTubePendingEntry == entry.id else { return }
                 self.youTubeResolution = nil
@@ -48,7 +58,7 @@ extension PlayerEngine {
     /// Resolves an upcoming YouTube song so it can be prepared gaplessly and saved for a crossfade.
     /// Only the current and next songs: resolving further ahead is what trips YouTube's bot checks.
     func prefetchYouTube(_ song: Song) {
-        guard let videoId = YouTubeID.raw(song.id), !services.isOffline, youTubePrefetches[videoId] == nil,
+        guard let videoId = YouTubeID.raw(song.id), !services.isInternetOffline, youTubePrefetches[videoId] == nil,
               downloads?.localFileURL(for: song.id) == nil, !streamCache.contains(song.id),
               YouTubeStreamResolver.shared.cachedStream(for: videoId) == nil,
               order.dropFirst(currentIndex).prefix(2).contains(where: { $0.song.id == song.id }) else { return }
@@ -64,6 +74,11 @@ extension PlayerEngine {
             self.prepareNext()
             self.syncCache()
         }
+    }
+
+    /// Saving ahead needs the internet for YouTube songs, the server for the rest.
+    var cacheOffline: Bool {
+        isStandaloneOrYouTubeQueue ? services.isInternetOffline : services.isOffline
     }
 
     /// The stream cache may run without a Subsonic URL provider when the queue has YouTube songs.
@@ -104,6 +119,7 @@ extension PlayerEngine {
     private func youTubeResolutionFailed(_ entry: QueueEntry, error: Error) {
         failedEntryIds.insert(entry.id)
         isBuffering = false
+        formatDescription = "YouTube Music"
         report("Couldn\u{2019}t play \u{201C}\(entry.song.title)\u{201D}: \(error.localizedDescription)")
         consecutiveFailures += 1
         guard userWantsPlaying, consecutiveFailures < min(max(order.count, 1), 5), let next = nextExplicitIndex() else {

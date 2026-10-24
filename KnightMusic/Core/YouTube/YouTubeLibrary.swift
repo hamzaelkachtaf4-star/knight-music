@@ -220,8 +220,10 @@ final class YouTubeLibrary {
         do {
             return try await database.pool.write { db in
                 try fresh.map { song in
-                    let merged = YouTubeMapping.merge(song, over: try Song.fetchOne(db, key: song.id))
-                    try merged.save(db)
+                    let stored = try Song.fetchOne(db, key: song.id)
+                    let merged = YouTubeMapping.merge(song, over: stored)
+                    // Unchanged rows aren't rewritten, so a search doesn't wake every live library query.
+                    if stored.map({ !sameSong($0, merged) }) ?? true { try merged.save(db) }
                     return merged
                 }
             }

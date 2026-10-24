@@ -92,8 +92,9 @@ extension PlayerEngine {
         guard settings.serverQueueSyncEnabled, !services.isOffline, let server = services.server else { return }
         do {
             guard let remoteQueue = try await server.getPlayQueue(), !remoteQueue.songs.isEmpty else { return }
-            let sameQueue = remoteQueue.songs.map(\.id) == order.map { $0.song.id }
-            let sameCurrent = remoteQueue.currentSongId == currentSong?.id
+            // The server only ever holds the Navidrome part of a mixed queue (see HybridServerActions).
+            let sameQueue = remoteQueue.songs.map(\.id) == order.map(\.song.id).filter { !YouTubeID.isYouTube($0) }
+            let sameCurrent = remoteQueue.currentSongId == currentSong?.id || YouTubeID.isYouTube(currentSong?.id)
             if sameQueue && sameCurrent { return }
             let serverNewer: Bool
             if let changed = remoteQueue.changed {

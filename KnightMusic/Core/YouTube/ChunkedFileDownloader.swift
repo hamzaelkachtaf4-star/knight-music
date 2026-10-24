@@ -29,7 +29,10 @@ enum ChunkedFileDownloader {
         func fetch(_ range: ClosedRange<Int>) async throws -> (Data, HTTPURLResponse) {
             let (data, response) = try await session.data(for: request(range))
             guard let http = response as? HTTPURLResponse else { throw YouTubeError.badResponse }
-            guard http.statusCode == 206 || http.statusCode == 200 else { throw YouTubeError.http(http.statusCode) }
+            // A 200 is the whole file, not the range: only usable as the very first read.
+            guard http.statusCode == 206 || (http.statusCode == 200 && range.lowerBound == 0) else {
+                throw YouTubeError.http(http.statusCode)
+            }
             return (data, http)
         }
 
@@ -43,7 +46,7 @@ enum ChunkedFileDownloader {
             let (first, response) = try await fetch(0...(chunk - 1))
             guard !first.isEmpty else { throw YouTubeError.badResponse }
             try handle.write(contentsOf: first)
-            let total = expectedLength ?? totalLength(response) ?? first.count
+            let total = response.statusCode == 200 ? first.count : (expectedLength ?? totalLength(response) ?? first.count)
             var done = first.count
             progress?(Double(done) / Double(max(total, 1)))
 

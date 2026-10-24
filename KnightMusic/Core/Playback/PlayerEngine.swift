@@ -45,6 +45,10 @@ final class PreparedItem {
         self.entry = entry
         self.resolved = resolved
     }
+
+    deinit {
+        streamLoader?.cancelAll()
+    }
 }
 
 /// Gapless AVQueuePlayer engine. The logical queue lives in `order`; the player always holds at most
@@ -407,7 +411,11 @@ final class PlayerEngine {
     // MARK: Seeking
 
     func seek(to time: TimeInterval) {
-        guard let tracked, !tracked.isRadio else { return }
+        guard let tracked, !tracked.isRadio else {
+            // A YouTube song still connecting starts wherever the user seeks to meanwhile.
+            if youTubePendingEntry != nil { currentTime = max(0, duration > 0 ? min(time, duration) : time) }
+            return
+        }
         if mixTail != nil { settleAutoMix(keepIncoming: true) }
         if let session = mixSession, session.phase != .planned || session.aRampIndex > 0 {
             cancelMix(reprepare: false)     // also restores A's own tempo if it had started easing

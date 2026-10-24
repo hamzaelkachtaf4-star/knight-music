@@ -156,9 +156,9 @@ actor LyricsService {
             guard let http = response as? HTTPURLResponse else { return .failure }
             switch http.statusCode {
             case 200..<300: return data.isEmpty ? .missing : .data(data)
-            // 404 is "no lyrics"; 400/401/403 mean the provider won't answer this query (e.g. needs a key for an
-            // uncached one) — also a miss, not an outage.
-            case 400, 401, 403, 404, 410: return .missing
+            // 404 is "no lyrics"; 400/401 mean the provider won't answer this query (BetterLyrics wants a key for
+            // uncached ones) — a miss. 403/429/5xx are a block or an outage, never remembered as "none".
+            case 400, 401, 404, 410: return .missing
             default: return .failure
             }
         } catch {

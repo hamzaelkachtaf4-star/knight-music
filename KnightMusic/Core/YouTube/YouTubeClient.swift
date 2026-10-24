@@ -130,6 +130,8 @@ actor YouTubeClient {
     // MARK: Player
 
     func player(videoId: String, as identity: PlayerIdentity) async throws -> YTPlayerResponse {
+        // A cold launch can resolve a restored song before any browse call minted a visitor id.
+        if visitorData == nil { await mintVisitorData() }
         var client: JSONObject = ["clientName": identity.name, "clientVersion": identity.version, "hl": language, "gl": region]
         for (key, value) in identity.extra { client[key] = value }
         if let visitorData { client["visitorData"] = visitorData }

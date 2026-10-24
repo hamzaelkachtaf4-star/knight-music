@@ -24,6 +24,15 @@ final class ChunkedStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @unche
         for task in tasks.values { task.cancel() }
     }
 
+    /// Stops every read in flight. The owning player item calls this when it is dropped: AVFoundation doesn't
+    /// always send `didCancel` for an item that is simply removed.
+    func cancelAll() {
+        queue.async {
+            for task in self.tasks.values { task.cancel() }
+            self.tasks.removeAll()
+        }
+    }
+
     func makeAsset() -> AVURLAsset {
         var components = URLComponents(url: remote, resolvingAgainstBaseURL: false)
         components?.scheme = Self.scheme
@@ -66,6 +75,7 @@ final class ChunkedStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @unche
                     ? total : min(total, offset + dataRequest.requestedLength)
                 while offset < end {
                     try Task.checkCancellation()
+                    if queue.sync(execute: { loadingRequest.isCancelled }) { throw CancellationError() }
                     let upper = min(offset + YouTubeStream.chunkSize, end) - 1
                     let bytes = try await fetch(offset...upper)
                     guard !bytes.isEmpty else { throw YouTubeError.badResponse }
@@ -99,7 +109,10 @@ final class ChunkedStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @unche
         request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
         let (data, response) = try await ChunkedFileDownloader.session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw YouTubeError.badResponse }
-        guard http.statusCode == 206 || http.statusCode == 200 else { throw YouTubeError.http(http.statusCode) }
-        return data
+        // A 200 carries the file from byte 0, which only matches a read that starts there.
+        guard http.statusCode == 206 || (http.statusCode == 200 && range.lowerBound == 0) else {
+            throw YouTubeError.http(http.statusCode)
+        }
+        return http.statusCode == 200 ? data.prefix(range.count) : data
     }
 }

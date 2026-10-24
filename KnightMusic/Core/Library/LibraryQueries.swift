@@ -32,14 +32,16 @@ enum LibraryQueries {
          OR song.id IN (SELECT songId FROM playlistEntry WHERE playlistId NOT LIKE 'yt:%' OR playlistId LIKE 'yt:local-%')
          OR song.id IN (SELECT songId FROM download WHERE state = 'completed'))
         """
+    /// `yt:` ids as a primary-key range (';' follows ':'), so only YouTube rows are visited, through the index.
+    private static let youTubeSongRange = "song.id >= 'yt:' AND song.id < 'yt;'"
     static let songInLibrary = "(song.id NOT LIKE 'yt:%' OR \(keptYouTubeSong))"
     static let albumInLibrary = """
         (album.id NOT LIKE 'yt:%' OR album.starred IS NOT NULL
-         OR album.id IN (SELECT song.albumId FROM song WHERE song.albumId LIKE 'yt:%' AND \(keptYouTubeSong)))
+         OR album.id IN (SELECT song.albumId FROM song WHERE \(youTubeSongRange) AND \(keptYouTubeSong)))
         """
     static let artistInLibrary = """
         (artist.id NOT LIKE 'yt:%' OR artist.starred IS NOT NULL
-         OR artist.id IN (SELECT song.artistId FROM song WHERE song.artistId LIKE 'yt:%' AND \(keptYouTubeSong)))
+         OR artist.id IN (SELECT song.artistId FROM song WHERE \(youTubeSongRange) AND \(keptYouTubeSong)))
         """
     /// Playlists imported from YouTube are pages to browse, not the user's own lists.
     static let playlistInLibrary = "(playlist.id NOT LIKE 'yt:%' OR playlist.id LIKE 'yt:local-%')"

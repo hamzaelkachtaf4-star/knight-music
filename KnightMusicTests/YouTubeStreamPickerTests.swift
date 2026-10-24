@@ -92,4 +92,24 @@ final class YouTubeStreamPickerTests: XCTestCase {
         XCTAssertNil(YouTubeStream.contentLength(of: hls))
         XCTAssertFalse(YouTubeStream.needsChunking(try XCTUnwrap(URL(string: "https://music.example.com/rest/stream?id=1"))))
     }
+
+    func testExclusionKeysCoverEveryTier() throws {
+        let vr = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?c=ANDROID_VR&cver=1.43.32"))
+        XCTAssertEqual(YouTubeStreamPicker.exclusionKey(of: vr), "ANDROID_VR/1.43.32")
+        let hls = try XCTUnwrap(URL(string: "https://manifest.googlevideo.com/api/manifest/hls_playlist/id/x/itag/234/playlist/index.m3u8"))
+        XCTAssertEqual(YouTubeStreamPicker.exclusionKey(of: hls), YouTubeStreamPicker.hlsKey)
+        let piped = try XCTUnwrap(URL(string: "https://pipedproxy.example/videoplayback?itag=140"))
+        XCTAssertEqual(YouTubeStreamPicker.exclusionKey(of: piped), YouTubeStreamPicker.fallbackKey)
+    }
+
+    func testExpiryUsesTheResponseClockNotTheURL() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        // A URL `expire` far in the past (a device clock hours fast) must not make a fresh stream stale.
+        let url = URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?expire=10&clen=1")!
+        let expiry = YouTubeStreamPicker.expiry(of: url, expiresInSeconds: 21_540, now: now, ttl: 2_700)
+        XCTAssertEqual(expiry, now.addingTimeInterval(2_700))
+        XCTAssertEqual(YouTubeStreamPicker.expiry(of: url, expiresInSeconds: 1_000, now: now, ttl: 2_700), now.addingTimeInterval(700))
+        // Without a stated lifetime, the TTL alone.
+        XCTAssertEqual(YouTubeStreamPicker.expiry(of: url, expiresInSeconds: nil, now: now, ttl: 2_700), now.addingTimeInterval(2_700))
+    }
 }

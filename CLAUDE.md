@@ -33,6 +33,10 @@ KnightMusic/
   Core/Playback PlayerEngine, PlayQueue, NowPlayingCenter, RemoteCommands, Scrobbler, StreamCache, SleepTimer
                 PlayerEngine+AutoMix: second deck, host-time-synced start, handoff, tail
   Core/AutoMix  AutoMixPlan, AutoMixClient (plans from server/automix), MixTap (MTAudioProcessingTap gain/filters)
+  Core/YouTube  YouTubeClient (Innertube WEB_REMIX + device `player` calls), YouTubeParser/StreamPicker (Foundation-only,
+                unit-tested), YouTubeStreamResolver (ANDROID_VR → IOS HLS → Piped/Invidious, best effort, no PO token),
+                ChunkedFileDownloader, YouTubeLibrary (feeds YouTube items into the GRDB mirror), HybridServerActions
+  Core/Lyrics   LyricsService (lrc.red, BetterLyrics, LRCLIB in parallel), TtmlParser, LrcParser, LyricsMatcher
   Core/Downloads DownloadManager (background URLSession), StorageManager
   Core/Artwork  ArtworkLoader (Nuke), AnimatedArtworkService (m8tec + animated WebP), ArtworkPalette
   Core/Support  Log (os.Logger subsystem com.knightabdo.knightmusic), NetworkMonitor, Haptics, AppSettings
@@ -63,6 +67,17 @@ KnightMusic/
   - `PlayerEngine.play(_ songs: [Song], startAt: Int, shuffle: Bool)`, `togglePlayPause()`, `next()`,
     `previous()`, `seek(to:)`, `enqueue(_:next:)`, `currentSong`, `isPlaying`, `currentTime`, `duration`,
     `queue`, `repeatMode`, `shuffleEnabled`, `source: AudioSource`.
+
+## YouTube Music (standalone, no server)
+- `AppModel.startStandalone()` opens a fixed on-device library (`AppModel.standaloneLibraryId`) when no Navidrome
+  account is active. YouTube ids are prefixed `yt:` (songs, albums, artists, playlists; on-device playlists are
+  `yt:local-…`). SyncEngine sweeps skip `yt:` rows; LibraryQueries counts a YouTube item as library only when liked,
+  played, in the user's playlist or downloaded. Mutations on `yt:` items (and everything standalone) stay local.
+- googlevideo `videoplayback` URLs refuse ranges over 1 MiB: playback goes through `ChunkedStreamLoader`
+  (AVAssetResourceLoader), files through `ChunkedFileDownloader`. AVFoundation misreads the length of these
+  fragmented MP4s, so YouTube songs keep their catalogue duration (`PlayerEngine.playableDuration`).
+- Anonymous clients hit bot checks: resolve only the current and next song, never retry in a loop.
+- Tests: `scripts/core-tests.sh` runs the Foundation-only tests without Xcode; CI runs all of `KnightMusicTests`.
 
 ## AutoMix (server/automix)
 Beat-matched transitions are planned on the Navidrome host by `server/automix` (Python service `knight-automix`,

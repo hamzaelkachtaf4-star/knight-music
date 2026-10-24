@@ -17,12 +17,15 @@ enum TtmlParser {
     /// TTML clock values: `12.5`, `1:02.500`, `01:00:01.25`, `750ms`, `3s`.
     static func milliseconds(_ value: String?) -> Int? {
         guard var raw = value?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
-        if raw.hasSuffix("ms") { return Double(raw.dropLast(2)).map { Int($0.rounded()) } }
+        // Documents come from the network: "inf", "nan" and "1e999" all parse as Double and would trap in Int().
+        func checked(_ ms: Double) -> Int? {
+            ms.isFinite && ms >= 0 && ms < 86_400_000 ? Int(ms.rounded()) : nil
+        }
+        if raw.hasSuffix("ms") { return Double(raw.dropLast(2)).flatMap(checked) }
         if raw.hasSuffix("s") { raw.removeLast() }
         let parts = raw.split(separator: ":", omittingEmptySubsequences: false).map { Double($0) }
-        guard !parts.isEmpty, parts.count <= 3, parts.allSatisfy({ $0 != nil && $0! >= 0 }) else { return nil }
-        let seconds = parts.reduce(0.0) { $0 * 60 + $1! }
-        return Int((seconds * 1000).rounded())
+        guard !parts.isEmpty, parts.count <= 3, parts.allSatisfy({ $0.map { $0.isFinite && $0 >= 0 } ?? false }) else { return nil }
+        return checked(parts.reduce(0.0) { $0 * 60 + $1! } * 1000)
     }
 
     // MARK: Lines

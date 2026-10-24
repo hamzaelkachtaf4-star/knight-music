@@ -89,14 +89,4 @@ final class YouTubeIntegrationAppTests: XCTestCase {
                        "https://i.ytimg.com/vi/x/hqdefault.jpg")
         XCTAssertNil(ArtworkLoader.directURL("al-4f2c", size: 300))
     }
-
-    // MARK: Resolver bookkeeping
-
-    func testRefusedClientKey() throws {
-        let url = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?c=ANDROID_VR&cver=1.65.10"))
-        XCTAssertEqual(YouTubeStreamResolver.clientKey(of: url), "ANDROID_VR/1.65.10")
-        let noVersion = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?c=ANDROID_VR"))
-        XCTAssertEqual(YouTubeStreamResolver.clientKey(of: noVersion), "ANDROID_VR/1.43.32")
-        XCTAssertNil(YouTubeStreamResolver.clientKey(of: try XCTUnwrap(URL(string: "https://example.com/a.m4a"))))
-    }
 }

@@ -72,7 +72,8 @@ struct LoginView: View {
                 .padding(.top, 24)
                 .padding(.bottom, 8)
 
-                if !app.isStandalone {
+                // Not offered while a server session is active (Settings → Add Server): there it would do nothing.
+                if !app.isStandalone && app.activeAccount == nil {
                     VStack(spacing: 10) {
                         Button {
                             Haptics.impact(.medium)
