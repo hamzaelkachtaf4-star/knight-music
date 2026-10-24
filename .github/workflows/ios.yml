@@ -65,6 +65,17 @@ jobs:
           grep -E "warning:" build.log | grep -v "SourcePackages" | sort -u | head -30 || true
           echo "BUILD OK"
 
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];c=[x for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')];c.sort(key=lambda x:x['name']);print(c[-1]['udid'] if c else '')")
+          xcodebuild test -project KnightMusic.xcodeproj -scheme KnightMusic -destination "id=$UDID" \
+            -derivedDataPath build/dd -clonedSourcePackagesDirPath build/SourcePackages \
+            -only-testing:KnightMusicTests CODE_SIGNING_ALLOWED=NO > test.log 2>&1 \
+            || { echo "::group::test failures"; grep -E "error:|failed|XCTAssert|Fatal" test.log | sort -u | head -80; echo "::endgroup::"; tail -40 test.log; exit 1; }
+          grep -E "Executed [0-9]+ test" test.log | tail -1
+          echo "TESTS OK"
+
       - name: Screenshots
         if: github.ref == 'refs/heads/main' || contains(github.event.head_commit.message, '[shots]') || inputs.screens
         run: bash scripts/screens.sh build/dd/Build/Products/Debug-iphonesimulator/KnightMusic.app screens

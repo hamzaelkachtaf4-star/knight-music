@@ -40,6 +40,9 @@ targets:
         product: Nuke
       - package: Nuke
         product: NukeUI
+    scheme:
+      testTargets:
+        - KnightMusicTests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.knightabdo.knightmusic
@@ -96,6 +99,22 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+
+  # Parser / stream-picking / lyrics tests. Foundation-only, so they also run without Xcode: scripts/core-tests.sh
+  KnightMusicTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: KnightMusicTests
+        excludes: [Fixtures]
+      - path: KnightMusicTests/Fixtures
+        buildPhase: resources
+    dependencies:
+      - target: KnightMusic
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.knightabdo.knightmusic.tests
 
   KnightMusicWidgets:
     type: app-extension
