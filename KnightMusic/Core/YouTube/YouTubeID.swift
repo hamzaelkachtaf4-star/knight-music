@@ -21,6 +21,17 @@ enum YouTubeID {
         return value.isEmpty ? nil : value
     }
 
+    /// A playlist made on this device. It shares the prefix so server syncs leave it alone too.
+    static func newLocalPlaylistId() -> String {
+        prefix + localPlaylistMarker + UUID().uuidString
+    }
+
+    static func isLocalPlaylist(_ id: String?) -> Bool {
+        raw(id)?.hasPrefix(localPlaylistMarker) == true
+    }
+
+    private static let localPlaylistMarker = "local-"
+
     /// SQL fragment that keeps YouTube rows out of server-mirror sweeps.
     static let notYouTubeSQL = "id NOT LIKE 'yt:%'"
 }

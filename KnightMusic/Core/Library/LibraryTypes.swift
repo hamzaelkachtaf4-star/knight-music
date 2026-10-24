@@ -51,12 +51,14 @@ enum LibraryError: LocalizedError {
     case notSignedIn
     case offline
     case notFound
+    case youTubeOnServer
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn: return "You are not signed in to a server."
         case .offline: return "You are offline. Go online to make this change."
         case .notFound: return "That item is no longer in your library."
+        case .youTubeOnServer: return "YouTube Music songs can only go in playlists on this device."
         }
     }
 }

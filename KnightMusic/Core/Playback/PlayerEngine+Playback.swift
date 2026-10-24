@@ -14,6 +14,7 @@ extension PlayerEngine {
     }
 
     func cacheExtension(for song: Song, quality: StreamQuality) -> String {
+        if YouTubeID.isYouTube(song.id) { return "m4a" }
         if quality.maxBitRate != nil { return quality.format ?? "mp3" }
         return song.suffix ?? "mp3"
     }
@@ -22,13 +23,23 @@ extension PlayerEngine {
     func isPlayable(_ song: Song) -> Bool {
         if downloads?.localFileURL(for: song.id) != nil { return true }
         if streamCache.contains(song.id) { return true }
+        if YouTubeID.isYouTube(song.id) { return !services.isOffline }
         return !services.isOffline && services.urls != nil
     }
 
+    /// A URL that can be saved as a file for `song` (stream cache, AutoMix). YouTube songs only have one once
+    /// resolved, and only when the resolved stream is a progressive file (HLS can't be saved).
     func streamURL(for song: Song, quality: StreamQuality) -> URL? {
-        services.urls?.streamURL(songId: song.id, maxBitRate: quality.maxBitRate,
-                                 format: quality.format ?? (quality.maxBitRate == nil ? "raw" : nil),
-                                 timeOffset: nil)
+        if let videoId = YouTubeID.raw(song.id) {
+            guard let stream = YouTubeStreamResolver.shared.cachedStream(for: videoId), stream.delivery == .progressive else {
+                prefetchYouTube(song)
+                return nil
+            }
+            return stream.url
+        }
+        return services.urls?.streamURL(songId: song.id, maxBitRate: quality.maxBitRate,
+                                        format: quality.format ?? (quality.maxBitRate == nil ? "raw" : nil),
+                                        timeOffset: nil)
     }
 
     func resolve(_ song: Song) -> ResolvedSource? {
@@ -44,6 +55,12 @@ extension PlayerEngine {
                                   description: AudioDescription.make(kind: .cached, song: song, quality: q))
         }
         guard !services.isOffline else { return nil }
+        if let videoId = YouTubeID.raw(song.id) {
+            guard let stream = YouTubeStreamResolver.shared.cachedStream(for: videoId) else { return nil }
+            var parts = ["Streaming", "AAC"]
+            if stream.kbps > 0 { parts.append("\(stream.kbps) kbps") }
+            return ResolvedSource(url: stream.url, kind: .streaming, quality: nil, description: parts.joined(separator: " \u{2022} "))
+        }
         let q = currentQuality()
         guard let url = streamURL(for: song, quality: q) else { return nil }
         return ResolvedSource(url: url, kind: .streaming, quality: q,
@@ -96,6 +113,11 @@ extension PlayerEngine {
         for i in sequence {
             let entry = order[i]
             if failedEntryIds.contains(entry.id) { continue }
+            if needsYouTubeResolution(entry.song) {
+                currentIndex = i
+                beginYouTubeResolution(entry, index: i, autoplay: autoplay, startAt: i == index ? startAt : 0)
+                return true
+            }
             guard let resolved = resolve(entry.song) else { continue }
             currentIndex = i
             activate(entry: entry, resolved: resolved, autoplay: autoplay, startAt: i == index ? startAt : 0)
@@ -111,6 +133,7 @@ extension PlayerEngine {
     }
 
     func activate(entry: QueueEntry, resolved: ResolvedSource, autoplay: Bool, startAt: TimeInterval) {
+        cancelYouTubeResolution()
         settleAutoMix(keepIncoming: false)
         scrobbler.end()
         seekGeneration += 1
@@ -172,6 +195,7 @@ extension PlayerEngine {
     }
 
     func clearPlayback() {
+        cancelYouTubeResolution()
         stopPlayer()
         scrobbler.end()
         remote?.cancelSeeking()
@@ -203,8 +227,12 @@ extension PlayerEngine {
     // MARK: Gapless preparation
 
     func makePrepared(entry: QueueEntry, resolved: ResolvedSource) -> PreparedItem {
-        let item = AVPlayerItem(asset: AVURLAsset(url: resolved.url))
+        // googlevideo files are only served in ≤1 MiB ranges: stream them through the chunking loader.
+        let loader = resolved.kind == .streaming && YouTubeStream.needsChunking(resolved.url)
+            ? ChunkedStreamLoader(remote: resolved.url) : nil
+        let item = AVPlayerItem(asset: loader?.makeAsset() ?? AVURLAsset(url: resolved.url))
         let prepared = PreparedItem(item: item, entry: entry, resolved: resolved)
+        prepared.streamLoader = loader
         if settings.speedChanged { item.audioTimePitchAlgorithm = .spectral }
         if settings.mixesTransitions || settings.eqEnabled { attachTap(prepared) }
         prepared.observations = [
@@ -254,8 +282,12 @@ extension PlayerEngine {
         for item in player.items() where item !== tracked.item { player.remove(item) }
         nextPrepared?.observations.removeAll()
         nextPrepared = nil
-        guard settings.gapless, !endOfSongArmed, !tracked.isRadio,
-              let index = naturalNextIndex(), let resolved = resolve(order[index].song) else { return }
+        guard settings.gapless, !endOfSongArmed, !tracked.isRadio, let index = naturalNextIndex() else { return }
+        if needsYouTubeResolution(order[index].song) {
+            prefetchYouTube(order[index].song)
+            return
+        }
+        guard let resolved = resolve(order[index].song) else { return }
         let prepared = makePrepared(entry: order[index], resolved: resolved)
         player.insert(prepared.item, after: tracked.item)
         nextPrepared = prepared
@@ -309,7 +341,7 @@ extension PlayerEngine {
     func syncCache() {
         if settings.savesUpcomingLocally {
             guard settings.streamCacheEnabled, !services.isOffline, currentRadio == nil,
-                  services.urls != nil, currentIndex < order.count else {
+                  services.urls != nil || isStandaloneOrYouTubeQueue, currentIndex < order.count else {
                 // AutoMix still needs its incoming song as a local file when the stream cache is off.
                 // With AutoMix off nothing is saved ahead: pending background downloads are cancelled.
                 let keep = plannedMix.map { Set([$0.to.id]) } ?? []
@@ -323,8 +355,9 @@ extension PlayerEngine {
             let quality = currentQuality()
             for song in songs where downloads?.localFileURL(for: song.id) == nil && !streamCache.contains(song.id) {
                 guard let url = streamURL(for: song, quality: quality) else { continue }
-                streamCache.cache(songId: song.id, url: url, quality: quality,
-                                  fileExtension: cacheExtension(for: song, quality: quality),
+                let songQuality = YouTubeID.isYouTube(song.id) ? StreamQuality.original : quality
+                streamCache.cache(songId: song.id, url: url, quality: songQuality,
+                                  fileExtension: cacheExtension(for: song, quality: songQuality),
                                   limitMB: settings.streamCacheLimitMB)
             }
             return
@@ -341,7 +374,7 @@ extension PlayerEngine {
         }
 
         guard networkAllowed, settings.streamCacheEnabled, !services.isOffline, currentRadio == nil,
-              services.urls != nil else {
+              services.urls != nil || isStandaloneOrYouTubeQueue else {
             let keep = plannedMix.map { Set([$0.to.id]) } ?? []
             streamCache.retainOnly(keep)
             return
@@ -355,8 +388,9 @@ extension PlayerEngine {
         let quality = currentQuality()
         for song in songs where downloads?.localFileURL(for: song.id) == nil && !streamCache.contains(song.id) {
             guard let url = streamURL(for: song, quality: quality) else { continue }
-            streamCache.cache(songId: song.id, url: url, quality: quality,
-                              fileExtension: cacheExtension(for: song, quality: quality),
+            let songQuality = YouTubeID.isYouTube(song.id) ? StreamQuality.original : quality
+            streamCache.cache(songId: song.id, url: url, quality: songQuality,
+                              fileExtension: cacheExtension(for: song, quality: songQuality),
                               limitMB: settings.streamCacheLimitMB)
         }
     }
@@ -534,7 +568,7 @@ extension PlayerEngine {
 
     func itemMetricsChanged(_ p: PreparedItem) {
         guard p === tracked else { return }
-        let d = p.item.duration.seconds
+        let d = playableDuration(of: p)
         if !p.isRadio, d.isFinite, d > 0, abs(d - duration) > 0.5 {
             duration = d
             nowPlaying.updateDuration(d)
@@ -555,7 +589,7 @@ extension PlayerEngine {
     // MARK: - Failures and Handoff
 
     func checkNextPreparedAddress() {
-        guard let next = nextPrepared, next.resolved.kind == .streaming,
+        guard let next = nextPrepared, next.resolved.kind == .streaming, !YouTubeID.isYouTube(next.entry.song.id),
               let curBase = services.currentBaseURL?() else { return }
         if !next.resolved.url.absoluteString.hasPrefix(curBase.absoluteString) {
             PlaybackLog.logger.info("Re-preparing nextPrepared (\(next.entry.song.title)) because URL points to old address")
@@ -565,7 +599,8 @@ extension PlayerEngine {
 
     @discardableResult
     func retryCurrentStreamAfterHandoff(reason: String) async -> Bool {
-        guard let tracked, tracked.resolved.kind == .streaming else { return false }
+        // A YouTube stream doesn't depend on the Navidrome address (its own failures re-resolve in handleFailure).
+        guard let tracked, tracked.resolved.kind == .streaming, !YouTubeID.isYouTube(tracked.entry.song.id) else { return false }
         let entry = tracked.entry
         let now = ProcessInfo.processInfo.systemUptime
         var timestamps = streamRetryHistory[entry.id] ?? []
@@ -610,6 +645,8 @@ extension PlayerEngine {
         if p === nextPrepared {
             if p.resolved.kind == .cached {
                 streamCache.remove(songId: p.entry.song.id)
+            } else if let videoId = YouTubeID.raw(p.entry.song.id) {
+                YouTubeStreamResolver.shared.refused(p.resolved.url, videoId: videoId)
             } else {
                 failedEntryIds.insert(p.entry.id)
             }
@@ -617,6 +654,13 @@ extension PlayerEngine {
             return
         }
         guard p === tracked else { return }
+        // An expired or refused YouTube URL: re-resolve once, away from the client that minted it.
+        if p.resolved.kind == .streaming, let videoId = YouTubeID.raw(p.entry.song.id), !retriedFromStream.contains(p.entry.id) {
+            retriedFromStream.insert(p.entry.id)
+            YouTubeStreamResolver.shared.refused(p.resolved.url, videoId: videoId)
+            load(index: currentIndex, autoplay: userWantsPlaying, startAt: currentTime)
+            return
+        }
         if p.resolved.kind == .cached, !retriedFromStream.contains(p.entry.id) {
             retriedFromStream.insert(p.entry.id)
             streamCache.remove(songId: p.entry.song.id)

@@ -63,11 +63,11 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(app.activeAccount?.name ?? "Knight Music")
+                            Text(app.activeAccount?.name ?? (app.isStandalone ? "YouTube Music" : "Knight Music"))
                                 .font(.title3)
                                 .bold()
                                 .foregroundStyle(Theme.label)
-                            Text("Manage servers, addresses, sync…")
+                            Text(app.isStandalone ? "On this device · Add a Navidrome server…" : "Manage servers, addresses, sync…")
                                 .font(.subheadline)
                                 .foregroundStyle(Theme.secondaryLabel)
                         }
@@ -76,7 +76,8 @@ struct SettingsView: View {
                 }
             }
 
-            // 2. Status row
+            // 2. Status row (a server's; the on-device library has none)
+            if !app.isStandalone {
             Section {
                 NavigationLink(destination: ServerStatusView()) {
                     HStack {
@@ -91,6 +92,7 @@ struct SettingsView: View {
                 }
             } footer: {
                 Text(serverFooterText)
+            }
             }
 
             // 3. Offline Mode
@@ -156,7 +158,7 @@ struct SettingsView: View {
                 Button(role: .destructive) {
                     showingLogoutConfirmation = true
                 } label: {
-                    Text("Log Out")
+                    Text(app.isStandalone ? "Leave YouTube Music Mode" : "Log Out")
                         .foregroundStyle(Theme.accent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -202,16 +204,26 @@ struct SettingsView: View {
             await serverInfo.fetchIfNeeded(app: app)
         }
         .confirmationDialog(
-            "Log Out",
+            app.isStandalone ? "Leave YouTube Music Mode" : "Log Out",
             isPresented: $showingLogoutConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Log Out", role: .destructive) {
-                app.logout()
+            if app.isStandalone {
+                Button("Leave", role: .destructive) {
+                    app.leaveStandalone()
+                }
+            } else {
+                Button("Log Out", role: .destructive) {
+                    app.logout()
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to log out? Cached and downloaded songs for this server will be deleted.")
+            if app.isStandalone {
+                Text("Your on-device library, favorites and downloads stay on this device for the next time.")
+            } else {
+                Text("Are you sure you want to log out? Cached and downloaded songs for this server will be deleted.")
+            }
         }
     }
 }

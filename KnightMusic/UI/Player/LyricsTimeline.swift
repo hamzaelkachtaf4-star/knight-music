@@ -8,6 +8,8 @@ struct IdentifiedLyricLine: Identifiable, Hashable, Sendable {
     let text: String
     /// Word timings from enhanced LRC (`<mm:ss.xx>word`); empty for plain line-synced lyrics.
     let words: [LyricWord]
+    /// When the last word stops being sung: a closing stamp with no word after it (raw lyric ms).
+    let endMs: Int?
 
     var start: Int? { line.start }
 
@@ -17,6 +19,7 @@ struct IdentifiedLyricLine: Identifiable, Hashable, Sendable {
         let parsed = LyricsTimeline.parseWords(line.value, lineStart: line.start ?? 0)
         self.text = parsed.text
         self.words = parsed.words
+        self.endMs = parsed.words.isEmpty ? nil : parsed.end
     }
 }
 
@@ -70,11 +73,11 @@ enum LyricsTimeline {
 
     /// Splits an enhanced-LRC line (`<00:12.34>Hello <00:12.80>world`) into timed words.
     /// Text before the first tag belongs to the line start.
-    nonisolated static func parseWords(_ value: String, lineStart: Int) -> (text: String, words: [LyricWord]) {
-        guard value.contains("<") else { return (value, []) }
+    nonisolated static func parseWords(_ value: String, lineStart: Int) -> (text: String, words: [LyricWord], end: Int?) {
+        guard value.contains("<") else { return (value, [], nil) }
         let tag = #/<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>/#
         let matches = value.matches(of: tag)
-        guard !matches.isEmpty else { return (value, []) }
+        guard !matches.isEmpty else { return (value, [], nil) }
 
         var words: [LyricWord] = []
         var plain = ""
@@ -103,6 +106,7 @@ enum LyricsTimeline {
             plain += tail
         }
         let text = plain.trimmingCharacters(in: .whitespaces)
-        return (text, words.count > 1 ? words : [])
+        // A stamp with nothing after it closes the line: that is when the last word ends.
+        return (text, words.count > 1 ? words : [], tail.isEmpty ? segmentStart : nil)
     }
 }

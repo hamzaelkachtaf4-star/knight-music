@@ -143,7 +143,8 @@ extension AppModel {
         addSessionObserver { app in
             ArtworkLoader.configure(provider: app.client)
             app.playbackServices.urls = app.client
-            app.playbackServices.server = app.client.map(SubsonicServerActions.init)
+            app.playbackServices.server = HybridServerActions(subsonic: app.client.map(SubsonicServerActions.init),
+                                                              library: app.library, youtube: app.youtube)
             app.playbackServices.autoMix = app.client.map { client in
                 AutoMixClient(urls: { path, items in client.autoMixURL(path: path, items: items) })
             }

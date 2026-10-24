@@ -56,4 +56,40 @@ final class YouTubeStreamPickerTests: XCTestCase {
         XCTAssertFalse(response.isPlayable)
         XCTAssertTrue(response.formats.isEmpty)
     }
+
+    func testPermanentVerdictsAreOnlyAboutTheSong() {
+        func response(_ status: String, _ reason: String?) -> YTPlayerResponse {
+            YTPlayerResponse(status: status, reason: reason, formats: [], hlsManifestURL: nil, expiresInSeconds: nil, durationSeconds: nil, loudnessDb: nil)
+        }
+        XCTAssertNotNil(YouTubeStreamPicker.permanentReason(response("LOGIN_REQUIRED", "Sign in to confirm your age")))
+        XCTAssertNotNil(YouTubeStreamPicker.permanentReason(response("UNPLAYABLE", "The uploader has not made this video available in your country")))
+        XCTAssertNotNil(YouTubeStreamPicker.permanentReason(response("ERROR", "This video has been removed by the uploader")))
+        XCTAssertNotNil(YouTubeStreamPicker.permanentReason(response("LOGIN_REQUIRED", "This video is private")))
+        // About the client or the network, not the song: never remembered.
+        XCTAssertNil(YouTubeStreamPicker.permanentReason(response("LOGIN_REQUIRED", "Sign in to confirm you’re not a bot")))
+        XCTAssertNil(YouTubeStreamPicker.permanentReason(response("LOGIN_REQUIRED", "Please sign in")))
+        XCTAssertNil(YouTubeStreamPicker.permanentReason(response("UNPLAYABLE", nil)))
+        XCTAssertNil(YouTubeStreamPicker.permanentReason(response("OK", "anything")))
+    }
+
+    func testMintingClientFromQueryAndPath() throws {
+        let query = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?itag=140&c=ANDROID_VR&cver=1.65.10&clen=1"))
+        XCTAssertEqual(YouTubeStreamPicker.mintingClient(of: query)?.name, "ANDROID_VR")
+        XCTAssertEqual(YouTubeStreamPicker.mintingClient(of: query)?.version, "1.65.10")
+        let path = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback/id/1/itag/234/c/IOS/cver/21.29.1/file/seg.ts"))
+        XCTAssertEqual(YouTubeStreamPicker.mintingClient(of: path)?.name, "IOS")
+        XCTAssertEqual(YouTubeStreamPicker.mintingClient(of: path)?.version, "21.29.1")
+        let bare = try XCTUnwrap(URL(string: "https://pipedproxy.example/videoplayback?itag=140"))
+        XCTAssertNil(YouTubeStreamPicker.mintingClient(of: bare))
+    }
+
+    func testChunkingAndLengthFromURL() throws {
+        let direct = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?itag=140&clen=3449447"))
+        XCTAssertTrue(YouTubeStream.needsChunking(direct))
+        XCTAssertEqual(YouTubeStream.contentLength(of: direct), 3_449_447)
+        let hls = try XCTUnwrap(URL(string: "https://manifest.googlevideo.com/api/manifest/hls_playlist/id/x/itag/234/playlist/index.m3u8"))
+        XCTAssertFalse(YouTubeStream.needsChunking(hls))
+        XCTAssertNil(YouTubeStream.contentLength(of: hls))
+        XCTAssertFalse(YouTubeStream.needsChunking(try XCTUnwrap(URL(string: "https://music.example.com/rest/stream?id=1"))))
+    }
 }

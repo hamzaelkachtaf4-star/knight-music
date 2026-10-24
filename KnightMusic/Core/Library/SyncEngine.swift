@@ -204,7 +204,7 @@ actor SyncEngine {
             Log.sync.info("albums: \(albumIds.count) (removed \(removed))")
             if removed > 0 {
                 try await database.pool.write { db in
-                    try db.execute(sql: "DELETE FROM song WHERE albumId NOT IN (SELECT id FROM album)")
+                    try db.execute(sql: "DELETE FROM song WHERE albumId NOT IN (SELECT id FROM album) AND \(YouTubeID.notYouTubeSQL)")
                 }
             }
         }
@@ -289,7 +289,8 @@ actor SyncEngine {
     private func sweep(_ table: String, keeping seen: Set<String>) async throws -> Int {
         try await database.pool.write { db in
             try populateKeepIds(db, keeping: seen)
-            try db.execute(sql: "DELETE FROM \(table) WHERE id NOT IN (SELECT id FROM keep_ids)")
+            // YouTube rows aren't the server's: a sync never removes them.
+            try db.execute(sql: "DELETE FROM \(table) WHERE id NOT IN (SELECT id FROM keep_ids) AND \(YouTubeID.notYouTubeSQL)")
             return db.changesCount
         }
     }
@@ -429,6 +430,6 @@ actor SyncEngine {
 @discardableResult
 private func clearStaleStars(_ db: Database, table: String, keep: Set<String>) throws -> Int {
     try populateKeepIds(db, keeping: keep)
-    try db.execute(sql: "UPDATE \(table) SET starred = NULL WHERE starred IS NOT NULL AND id NOT IN (SELECT id FROM keep_ids)")
+    try db.execute(sql: "UPDATE \(table) SET starred = NULL WHERE starred IS NOT NULL AND id NOT IN (SELECT id FROM keep_ids) AND \(YouTubeID.notYouTubeSQL)")
     return db.changesCount
 }

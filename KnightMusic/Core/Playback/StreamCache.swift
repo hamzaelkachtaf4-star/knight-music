@@ -247,18 +247,28 @@ final class StreamCache: @unchecked Sendable {
         var request = URLRequest(url: job.url)
         request.networkServiceType = job.urgent ? .responsiveData : .background
         do {
-            let (tmp, response) = try await session.download(for: request,
-                                                              delegate: TransferProgress(cache: self, songId: job.songId))
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
+            // YouTube files are only served in ≤1 MiB ranges.
+            if YouTubeStream.needsChunking(job.url) {
+                let tmp = try await ChunkedFileDownloader.download(
+                    job.url, expectedLength: YouTubeStream.contentLength(of: job.url),
+                    networkServiceType: request.networkServiceType,
+                    progress: { [weak self] fraction in self?.progress(job.songId, fraction: fraction) })
+                try Task.checkCancellation()
+                store(tmp: tmp, job: job)
+            } else {
+                let (tmp, response) = try await session.download(for: request,
+                                                                  delegate: TransferProgress(cache: self, songId: job.songId))
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw URLError(.badServerResponse)
+                }
+                let mime = http.mimeType?.lowercased() ?? ""
+                // Subsonic reports errors as HTTP 200 with a JSON/XML body.
+                if mime.contains("json") || mime.contains("xml") || mime.hasPrefix("text") {
+                    throw URLError(.cannotParseResponse)
+                }
+                try Task.checkCancellation()
+                store(tmp: tmp, job: job)
             }
-            let mime = http.mimeType?.lowercased() ?? ""
-            // Subsonic reports errors as HTTP 200 with a JSON/XML body.
-            if mime.contains("json") || mime.contains("xml") || mime.hasPrefix("text") {
-                throw URLError(.cannotParseResponse)
-            }
-            try Task.checkCancellation()
-            store(tmp: tmp, job: job)
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
         } catch {

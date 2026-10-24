@@ -64,12 +64,42 @@ struct LoginView: View {
                         .font(.kmLargeTitle)
                         .foregroundStyle(Theme.label)
 
-                    Text("Connect to your Navidrome server")
+                    Text(app.isStandalone ? "Add your Navidrome server" : "Play YouTube Music, or connect your Navidrome server")
                         .font(.system(size: 16))
                         .foregroundStyle(Theme.secondaryLabel)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(.top, 24)
                 .padding(.bottom, 8)
+
+                if !app.isStandalone {
+                    VStack(spacing: 10) {
+                        Button {
+                            Haptics.impact(.medium)
+                            app.startStandalone()
+                        } label: {
+                            Label("Start with YouTube Music", systemImage: "play.circle.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                        }
+                        .buttonStyle(.glassProminent)
+
+                        Text("No server or account needed. Search, play and save songs on this device.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.secondaryLabel)
+                            .multilineTextAlignment(.center)
+                    }
+
+                    HStack(spacing: 12) {
+                        Rectangle().fill(Theme.separator).frame(height: 1)
+                        Text("or use Navidrome")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.secondaryLabel)
+                            .fixedSize()
+                        Rectangle().fill(Theme.separator).frame(height: 1)
+                    }
+                }
 
                 // Form Fields
                 VStack(spacing: 16) {
@@ -194,7 +224,7 @@ struct LoginView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
                     }
-                    .buttonStyle(.glassProminent)
+                    .loginButtonStyle(prominent: app.isStandalone)
                     .disabled(!isValid || isBusy)
 
                     if let displayedError {
@@ -236,5 +266,13 @@ struct LoginView: View {
             }
             isConnecting = false
         }
+    }
+}
+
+private extension View {
+    /// The Navidrome "Connect" button is secondary on first launch (YouTube Music leads) and primary when
+    /// adding a server from Settings.
+    @ViewBuilder func loginButtonStyle(prominent: Bool) -> some View {
+        if prominent { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
     }
 }

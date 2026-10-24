@@ -73,7 +73,19 @@ final class ArtworkLoader: @unchecked Sendable {
 
     /// Un-cached URL straight from the provider (original size when `size` is nil). Used by the animated fallback.
     func coverArtURL(id: String, size: Int?) -> URL? {
-        currentProvider?.coverArtURL(id: id, size: size)
+        if let direct = Self.directURL(id, size: size) { return direct }
+        return currentProvider?.coverArtURL(id: id, size: size)
+    }
+
+    /// YouTube items store their thumbnail URL as the cover-art id. googleusercontent thumbnails take the size
+    /// in a `=w…-h…` suffix, so they are re-asked at the bucket's size; other hosts are used as they are.
+    static func directURL(_ id: String, size: Int?) -> URL? {
+        guard id.hasPrefix("https://") || id.hasPrefix("http://") else { return nil }
+        guard let size, let host = URL(string: id)?.host, host.hasSuffix("googleusercontent.com") || host.hasSuffix("ggpht.com") else {
+            return URL(string: id)
+        }
+        let base = id.range(of: #"=[wshp][^/]*$"#, options: .regularExpression).map { String(id[..<$0.lowerBound]) } ?? id
+        return URL(string: "\(base)=w\(size)-h\(size)-l90-rj")
     }
 
     func request(coverArt: String?, pointSize: CGFloat, scale: CGFloat = 3) -> ImageRequest? {
@@ -82,9 +94,8 @@ final class ArtworkLoader: @unchecked Sendable {
     }
 
     func request(coverArt id: String, pixels: Int) -> ImageRequest? {
-        guard let provider = currentProvider else { return nil }
         let bucket = Self.bucket(forPixels: pixels)
-        let url = provider.coverArtURL(id: id, size: bucket)
+        guard let url = Self.directURL(id, size: bucket) ?? currentProvider?.coverArtURL(id: id, size: bucket) else { return nil }
         return ImageRequest(
             url: url,
             processors: [ImageProcessors.Resize(size: CGSize(width: bucket, height: bucket), unit: .pixels, contentMode: .aspectFill, crop: false, upscale: false)],

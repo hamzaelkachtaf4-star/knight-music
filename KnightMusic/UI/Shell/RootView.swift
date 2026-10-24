@@ -17,7 +17,7 @@ struct RootView: View {
         if app.debugScreen == "onboarding" {
             return true
         }
-        if app.activeAccount == nil {
+        if app.activeAccount == nil && !app.isStandalone {
             switch app.session {
             case .loggedOut, .connecting, .failed:
                 return true

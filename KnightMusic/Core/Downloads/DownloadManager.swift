@@ -46,6 +46,9 @@ final class DownloadManager {
     @ObservationIgnored private var deferredWork: [@MainActor () -> Void] = []
     @ObservationIgnored private var ready = false
     @ObservationIgnored private var lastProgressPublish: [String: TimeInterval] = [:]
+    /// YouTube downloads run in the foreground: googlevideo only serves ≤1 MiB ranges, which a background
+    /// session can't stitch together.
+    @ObservationIgnored private var foregroundTasks: [String: Task<Void, Never>] = [:]
 
     init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -132,7 +135,8 @@ final class DownloadManager {
         let settings = services.settings
         for song in songs {
             if let state = statuses[song.id]?.state, state != .failed { continue }
-            let ext = settings.downloadMaxBitRate > 0 ? (settings.downloadFormat ?? "mp3") : (song.suffix ?? "mp3")
+            let ext = YouTubeID.isYouTube(song.id) ? "m4a"
+                : settings.downloadMaxBitRate > 0 ? (settings.downloadFormat ?? "mp3") : (song.suffix ?? "mp3")
             paths[song.id] = "\(safeFileComponent(song.id)).\(ext)"
             addedAt[song.id] = Date()
             statuses[song.id] = DownloadStatus(state: .queued, progress: 0, bytes: 0, errorMessage: nil)
@@ -200,11 +204,21 @@ final class DownloadManager {
     }
 
     private func startQueued() {
-        guard ready, let urls = services.urls, !services.isOffline else { return }
+        guard ready, !services.isOffline else { return }
+        let urls = services.urls
         let settings = services.settings
+        var waitingForServer: [String] = []
         while active.count < Self.maxConcurrent, !pending.isEmpty {
             let id = pending.removeFirst()
             guard statuses[id] != nil, let rel = paths[id] else { continue }
+            if YouTubeID.isYouTube(id) {
+                startYouTube(id, relativePath: rel, allowsCellular: settings.downloadOnCellular)
+                continue
+            }
+            guard let urls else {
+                waitingForServer.append(id)
+                continue
+            }
             let ext = (rel as NSString).pathExtension
             let url = settings.downloadMaxBitRate > 0
                 ? urls.streamURL(songId: id, maxBitRate: settings.downloadMaxBitRate,
@@ -219,6 +233,39 @@ final class DownloadManager {
             statuses[id] = DownloadStatus(state: .downloading, progress: 0, bytes: 0, errorMessage: nil)
             persist(id)
         }
+        pending.insert(contentsOf: waitingForServer, at: 0)
+    }
+
+    private func startYouTube(_ id: String, relativePath rel: String, allowsCellular: Bool) {
+        guard let videoId = YouTubeID.raw(id) else { return }
+        active.insert(id)
+        statuses[id] = DownloadStatus(state: .downloading, progress: 0, bytes: 0, errorMessage: nil)
+        persist(id)
+        let dest = directory.appendingPathComponent(rel)
+        foregroundTasks[id] = Task { [weak self] in
+            do {
+                let stream = try await YouTubeStreamResolver.shared.resolveDownloadable(videoId)
+                let total = Int64(stream.contentLength ?? 0)
+                let tmp = try await ChunkedFileDownloader.download(
+                    stream.url, expectedLength: stream.contentLength, allowsCellular: allowsCellular,
+                    progress: { fraction in
+                        Task { @MainActor in self?.progress(id, received: Int64(fraction * Double(total)), expected: total) }
+                    })
+                try Task.checkCancellation()
+                let fm = FileManager.default
+                try? fm.removeItem(at: dest)
+                try fm.moveItem(at: tmp, to: dest)
+                excludeFromBackup(dest)
+                let bytes = (try fm.attributesOfItem(atPath: dest.path)[.size] as? NSNumber)?.intValue ?? 0
+                self?.foregroundTasks[id] = nil
+                self?.finished(id, relativePath: rel, bytes: bytes, failure: bytes > 0 ? nil : "The downloaded file was empty")
+            } catch is CancellationError {
+                self?.foregroundTasks[id] = nil
+            } catch {
+                self?.foregroundTasks[id] = nil
+                self?.failed(id, message: error.localizedDescription)
+            }
+        }
     }
 
     private func remove(_ ids: [String]) {
@@ -227,6 +274,7 @@ final class DownloadManager {
         pending.removeAll { idSet.contains($0) }
         let wasActive = active.intersection(idSet)
         active.subtract(idSet)
+        for id in ids { foregroundTasks.removeValue(forKey: id)?.cancel() }
         for id in ids {
             if let rel = paths[id] { try? FileManager.default.removeItem(at: directory.appendingPathComponent(rel)) }
             paths[id] = nil

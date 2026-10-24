@@ -12,12 +12,15 @@ SOURCES=(
   KnightMusic/Core/YouTube/YouTubeModels.swift
   KnightMusic/Core/YouTube/YouTubeParser.swift
   KnightMusic/Core/YouTube/YouTubeStreamPicker.swift
+  KnightMusic/Core/YouTube/YouTubeStream.swift
   KnightMusic/Core/Lyrics/LyricsDocument.swift
   KnightMusic/Core/Lyrics/TtmlParser.swift
   KnightMusic/Core/Lyrics/LrcParser.swift
   KnightMusic/Core/Lyrics/LyricsMatcher.swift
 )
-TESTS=(KnightMusicTests/*.swift)
+# *AppTests.swift need app types (GRDB, Nuke) and only run in CI.
+TESTS=()
+for f in KnightMusicTests/*.swift; do [[ "$f" == *AppTests.swift ]] || TESTS+=("$f"); done
 swiftc -parse-as-library -emit-library -emit-module -module-name XCTest \
   -o "$OUT/libXCTest.dylib" -emit-module-path "$OUT/XCTest.swiftmodule" scripts/core-tests/XCTestShim.swift
 {

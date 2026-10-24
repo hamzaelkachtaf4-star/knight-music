@@ -22,6 +22,7 @@ final class AppModel {
     let artwork = AnimatedArtworkService()
     let player: PlayerEngine
     let hermes = HermesService()
+    let youtube = YouTubeLibrary()
     let updates = UpdateChecker()
     @ObservationIgnored private var autoMixShowcase: AutoMixShowcase?
     let autoDownloader = AutoDownloader()
@@ -33,6 +34,8 @@ final class AppModel {
     /// Library mirror of the active account; nil when logged out.
     private(set) var database: LibraryDatabase?
     private(set) var activeAccount: ServerAccount?
+    /// True when the library is the on-device YouTube Music one (no Navidrome account active).
+    private(set) var isStandalone = false
     /// False when the last reachability check (ping on any address) failed.
     private(set) var serverReachable = true
     /// Bumps on every client/database change; observe it from views that must rebuild on account switch.
@@ -55,6 +58,7 @@ final class AppModel {
         player = PlayerEngine()
         network.onChange = { [weak self] in self?.networkChanged() }
         library.isOfflineProvider = { [weak self] in self?.isOffline ?? false }
+        youtube.configure(library: library)
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.library.dropCaches() }
         }
@@ -175,7 +179,11 @@ final class AppModel {
 
     /// Pull-to-refresh. Safe to call from `.refreshable`: view cancellation doesn't cancel the sync.
     func pullToRefresh() async {
-        await refresh()
+        if isStandalone {
+            await youtube.loadHome(force: true)
+        } else {
+            await refresh()
+        }
     }
 
     /// Waits for whatever sync is currently running (used by screenshot mode).
@@ -327,16 +335,66 @@ final class AppModel {
             } catch {
                 session = .failed(error.localizedDescription)
             }
+        } else if standaloneEnabled {
+            activateStandalone()
         } else {
             session = .loggedOut
             notifySessionChanged()
         }
     }
 
+    // MARK: - Standalone (YouTube Music, no server)
+
+    /// The on-device library's fixed id: one standalone library per install, kept across mode switches.
+    static let standaloneLibraryId = UUID(uuidString: "4B4D5954-0000-4000-8000-000000000001")!
+    private static let standaloneKey = "standaloneMode"
+
+    private var standaloneEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.standaloneKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.standaloneKey) }
+    }
+
+    /// Starts using Knight Music with YouTube Music and nothing else.
+    func startStandalone() {
+        standaloneEnabled = true
+        guard activeAccount == nil else { return }
+        activateStandalone()
+    }
+
+    /// Leaves YouTube-only mode. The on-device library stays on disk for the next time.
+    func leaveStandalone() {
+        standaloneEnabled = false
+        guard isStandalone else { return }
+        teardownSession()
+        session = .loggedOut
+        notifySessionChanged()
+    }
+
+    private func activateStandalone() {
+        if isStandalone, database != nil { return }
+        do {
+            let database = try LibraryDatabase(accountId: Self.standaloneLibraryId)
+            teardownSession()
+            self.database = database
+            isStandalone = true
+            serverReachable = true
+            library.configure(database: database, client: nil, syncEngine: nil)
+            session = .ready
+            notifySessionChanged()
+            Task { await youtube.loadHome() }
+        } catch {
+            session = .failed(error.localizedDescription)
+            Log.app.error("standalone library failed to open: \(error)")
+        }
+    }
+
     // MARK: - Session lifecycle
 
     private func restoreSession() {
-        guard let account = accounts.active else { return }
+        guard let account = accounts.active else {
+            if standaloneEnabled { activateStandalone() }
+            return
+        }
         do {
             try activate(account)
         } catch {
@@ -399,6 +457,7 @@ final class AppModel {
         database = nil
         password = nil
         activeAccount = nil
+        isStandalone = false
         library.configure(database: nil, client: nil, syncEngine: nil)
         syncStatus.reset()
     }

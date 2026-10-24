@@ -62,6 +62,7 @@ struct KnightMusicApp: App {
                 .environment(app.network)
                 .environment(app.syncStatus)
                 .environment(app.hermes)
+                .environment(app.youtube)
                 .environment(app.updates)
                 .preferredColorScheme(app.settings.appearance.colorScheme)
 

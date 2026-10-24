@@ -95,8 +95,12 @@ extension PlayerEngine {
             installPlan(crossfadePlan(from: tracked, seconds: Double(settings.crossfadeSeconds)), trackedEntry: tracked.entry.id, target: target)
             return
         }
-        guard let provider = services.autoMix else {
-            autoMixNote = "Connect to your server to use AutoMix"
+        // Beat-matching is planned by the Navidrome host; YouTube songs and the on-device library blend with a
+        // local crossfade instead.
+        guard let provider = services.autoMix,
+              !YouTubeID.isYouTube(tracked.entry.song.id), !YouTubeID.isYouTube(target.song.id) else {
+            let seconds = settings.crossfadeSeconds > 0 ? settings.crossfadeSeconds : Self.localMixSeconds
+            installPlan(crossfadePlan(from: tracked, seconds: Double(seconds)), trackedEntry: tracked.entry.id, target: target)
             return
         }
         let fromId = tracked.entry.song.id, toId = target.song.id
@@ -109,10 +113,12 @@ extension PlayerEngine {
         prefetchUpcomingPlans(provider)
     }
 
+    /// AutoMix without a server to plan it: this long a crossfade.
+    static let localMixSeconds = 6
+
     /// Plain equal-power crossfade over the last `seconds` of the current song (AutoMix off, crossfade on).
     private func crossfadePlan(from outgoing: PreparedItem, seconds: Double) -> AutoMixPlan {
-        let itemDuration = outgoing.item.duration
-        let duration = itemDuration.isNumeric && itemDuration.seconds > 0 ? itemDuration.seconds : outgoing.entry.song.durationSeconds
+        let duration = playableDuration(of: outgoing)
         guard duration > seconds * 2 + 10 else {
             return AutoMixPlan(version: AutoMixPlan.supportedVersion, mode: .gapless, reason: "song too short to crossfade", final: true)
         }
@@ -540,7 +546,7 @@ extension PlayerEngine {
     /// Starts (or moves to the front) the download of the incoming song, minutes before its transition.
     func ensureLocal(_ song: Song) {
         guard !isLocal(song), !services.isOffline else { return }
-        let quality = currentQuality()
+        let quality = YouTubeID.isYouTube(song.id) ? StreamQuality.original : currentQuality()
         guard let url = streamURL(for: song, quality: quality) else { return }
         streamCache.prioritize(songId: song.id, url: url, quality: quality,
                                fileExtension: cacheExtension(for: song, quality: quality),

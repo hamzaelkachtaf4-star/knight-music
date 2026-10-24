@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Synced and unsynced lyrics viewer:
-/// - Fetches lyrics via `library.lyrics(songId:)`, preferring synced lyrics
+/// - Fetches lyrics via `library.lyrics(for:)` (mirror → server → LRCLIB / lrc.red / BetterLyrics), preferring synced
 /// - Synced: 28pt bold (iPad 34pt), active line glows (word by word for enhanced LRC), others dimmed and blurred
 /// - Smooth auto-scroll keeps the active line at ~1/3 screen height
 /// - Tap a line to seek directly to its timestamp (outside sync mode)
@@ -90,7 +90,7 @@ struct LyricsView: View {
             showSyncedToast = false
             syncedLineIndex = nil
             activeIndex = nil
-            lyricsList = await library.lyrics(songId: song.id)
+            lyricsList = await library.lyrics(for: song, durationHint: player.duration)
             rebuildLyricsState()
             isLoading = false
         }
@@ -452,6 +452,8 @@ struct LyricsView: View {
 
     /// Raw lyric time (ms) at which line `index` stops being sung.
     private func lineEnd(after index: Int) -> Int {
+        // Word-timed lines end with a closing stamp: the last word stops there, not at the next line.
+        if let end = identifiedLines[index].endMs { return end }
         if index + 1 < identifiedLines.count, let next = identifiedLines[index + 1].start {
             return next
         }

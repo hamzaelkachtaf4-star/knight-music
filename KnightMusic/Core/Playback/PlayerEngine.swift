@@ -36,6 +36,8 @@ final class PreparedItem {
     let automation = MixAutomation()
     var tapRequested = false
     var tapAttached = false
+    /// Serves a chunked YouTube stream; the asset only holds it weakly.
+    var streamLoader: ChunkedStreamLoader?
     var isRadio: Bool { resolved.kind == .radio }
 
     init(item: AVPlayerItem, entry: QueueEntry, resolved: ResolvedSource) {
@@ -155,6 +157,11 @@ final class PlayerEngine {
     @ObservationIgnored var isRetryingHandoff = false
     @ObservationIgnored var stationRefillTask: Task<Void, Never>?
     @ObservationIgnored var stationDatabase: DatabaseWriter?
+    /// The YouTube song being resolved before it can become `tracked`, and the task doing it.
+    @ObservationIgnored var youTubePendingEntry: UUID?
+    @ObservationIgnored var youTubeResolution: Task<Void, Never>?
+    /// Upcoming YouTube songs being resolved ahead (current + next only, to stay clear of bot checks).
+    @ObservationIgnored var youTubePrefetches: [String: Task<Void, Never>] = [:]
 
     var settings: PlaybackSettings { services.settings }
 
@@ -327,7 +334,7 @@ final class PlayerEngine {
             load(index: currentIndex, autoplay: true, startAt: currentTime)
             return
         }
-        if let currentSong, !isLocal(currentSong), services.isResolvingAddress?() == true {
+        if let currentSong, !isLocal(currentSong), !YouTubeID.isYouTube(currentSong.id), services.isResolvingAddress?() == true {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 PlaybackLog.logger.info("Cold launch: waiting up to 5s for address resolution before playing")

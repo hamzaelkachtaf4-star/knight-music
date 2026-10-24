@@ -234,47 +234,67 @@ final class LibraryRepository {
 
     // MARK: - Lyrics & artist info (DB first, then server)
 
-    func lyrics(songId: String) async -> [StructuredLyrics] {
-        guard let database else { return [] }
-        let cached: (json: String, fetchedAt: Date)?
-        do {
-            cached = try await database.pool.read { db -> (json: String, fetchedAt: Date)? in
-                guard let row = try Row.fetchOne(db, sql: "SELECT json, fetchedAt FROM lyrics WHERE songId = ?", arguments: [songId]) else { return nil }
-                let json: String = row["json"]
-                let fetchedAt: Date = row["fetchedAt"]
-                return (json, fetchedAt)
-            }
-        } catch {
-            Log.database.warning("Reading cached lyrics for \(songId) failed: \(error)")
-            cached = nil
-        }
-        let decoder = JSONDecoder()
-        if let cached, let data = cached.json.data(using: .utf8),
-           let lines = try? decoder.decode([StructuredLyrics].self, from: data) {
-            let age = Date().timeIntervalSince(cached.fetchedAt)
-            // Found lyrics are kept; "none" is re-checked after a week.
-            if !lines.isEmpty || age < 7 * 86400 || isOfflineProvider() { return lines }
-        }
-        guard let client, !isOfflineProvider() else { return [] }
-        do {
-            let fetched = try await client.getLyricsBySongId(id: songId)
+    /// Lyrics for `song`: the mirror first (works offline), then the Navidrome server, then the public
+    /// multi-source engine (word-synced TTML, line-synced LRC) when the server has nothing synced.
+    /// Answers are cached; "none" is re-checked after a week, and a provider outage is never cached.
+    func lyrics(for song: Song, durationHint: TimeInterval = 0) async -> [StructuredLyrics] {
+        let songId = song.id
+        if let database {
+            let cached: (json: String, fetchedAt: Date)?
             do {
-                if let data = try? JSONEncoder().encode(fetched), let json = String(data: data, encoding: .utf8) {
-                    try await database.pool.write { db in
-                        try db.execute(
-                            sql: "INSERT INTO lyrics(songId, json, fetchedAt) VALUES (?, ?, ?) ON CONFLICT(songId) DO UPDATE SET json = excluded.json, fetchedAt = excluded.fetchedAt",
-                            arguments: [songId, json, Date()]
-                        )
-                    }
+                cached = try await database.pool.read { db -> (json: String, fetchedAt: Date)? in
+                    guard let row = try Row.fetchOne(db, sql: "SELECT json, fetchedAt FROM lyrics WHERE songId = ?", arguments: [songId]) else { return nil }
+                    let json: String = row["json"]
+                    let fetchedAt: Date = row["fetchedAt"]
+                    return (json, fetchedAt)
+                }
+            } catch {
+                Log.database.warning("Reading cached lyrics for \(songId) failed: \(error)")
+                cached = nil
+            }
+            if let cached, let data = cached.json.data(using: .utf8),
+               let lines = try? JSONDecoder().decode([StructuredLyrics].self, from: data) {
+                let age = Date().timeIntervalSince(cached.fetchedAt)
+                // Synced lyrics are kept; "none" and unsynced-only answers are re-checked after a week.
+                if lines.contains(where: \.synced) || age < 7 * 86400 || isOfflineProvider() { return lines }
+            }
+        }
+        guard !isOfflineProvider() else { return [] }
+
+        var found: [StructuredLyrics] = []
+        if let client, !YouTubeID.isYouTube(songId) {
+            do {
+                found = try await client.getLyricsBySongId(id: songId).filter { !$0.line.isEmpty }
+            } catch {
+                Log.sync.warning("lyrics(\(songId)) from server failed: \(error.localizedDescription)")
+            }
+        }
+        var cacheable = true
+        if !found.contains(where: \.synced), let artist = song.artist, !artist.isEmpty {
+            let seconds = song.duration ?? (durationHint > 0 ? Int(durationHint.rounded()) : nil)
+            switch await LyricsService.shared.lyrics(title: song.title, artist: artist, album: song.album, durationSeconds: seconds) {
+            case .found(let online):
+                // A synced answer goes first; the server's unsynced text stays as a fallback behind it.
+                found = online.synced ? [online] + found : (found.isEmpty ? [online] : found)
+            case .notFound:
+                break
+            case .unavailable:
+                cacheable = !found.isEmpty
+            }
+        }
+        if cacheable, let database, let data = try? JSONEncoder().encode(found), let json = String(data: data, encoding: .utf8) {
+            do {
+                try await database.pool.write { db in
+                    try db.execute(
+                        sql: "INSERT INTO lyrics(songId, json, fetchedAt) VALUES (?, ?, ?) ON CONFLICT(songId) DO UPDATE SET json = excluded.json, fetchedAt = excluded.fetchedAt",
+                        arguments: [songId, json, Date()]
+                    )
                 }
             } catch {
                 Log.database.warning("Caching lyrics for \(songId) failed: \(error)")
             }
-            return fetched
-        } catch {
-            Log.sync.warning("lyrics(\(songId)) failed: \(error.localizedDescription)")
-            return []
         }
+        return found
     }
 
     func artistInfo(artistId: String) async -> ArtistInfo? {
@@ -384,8 +404,19 @@ final class LibraryRepository {
         return database
     }
 
+    /// YouTube items, and everything in the on-device (standalone) library, are only ever changed locally.
+    private func isLocalOnly(_ id: String) -> Bool {
+        YouTubeID.isYouTube(id) || (client == nil && database != nil)
+    }
+
     /// Optimistic: the heart flips immediately, and flips back if the server rejects it.
     func setStarred(_ kind: StarKind, id: String, _ on: Bool) async throws {
+        if isLocalOnly(id) {
+            let database = try requireDatabase()
+            try await write(database, "UPDATE \(table(for: kind)) SET starred = ? WHERE id = ?", [on ? Date() : nil, id])
+            if kind == .song { onSongStarChanged?(id, on) }
+            return
+        }
         let client = try requireClient()
         let database = try requireDatabase()
         let table = table(for: kind)
@@ -433,6 +464,12 @@ final class LibraryRepository {
     /// Rating 0...5 (0 clears). Songs and albums.
     func setRating(_ kind: StarKind, id: String, rating: Int) async throws {
         guard kind != .artist else { return }
+        if isLocalOnly(id) {
+            let database = try requireDatabase()
+            let value = max(0, min(5, rating))
+            try await write(database, "UPDATE \(table(for: kind)) SET userRating = ? WHERE id = ?", [value == 0 ? nil : value, id])
+            return
+        }
         let client = try requireClient()
         let database = try requireDatabase()
         let table = table(for: kind)
@@ -458,6 +495,10 @@ final class LibraryRepository {
 
     @discardableResult
     func createPlaylist(name: String, songIds: [String] = []) async throws -> Playlist {
+        // A server can't hold YouTube songs: those (and the on-device library's) playlists live on the device.
+        if client == nil || songIds.contains(where: { YouTubeID.isYouTube($0) }) {
+            return try await createLocalPlaylist(name: name, songIds: songIds)
+        }
         let client = try requireClient()
         let database = try requireDatabase()
         do {
@@ -477,10 +518,18 @@ final class LibraryRepository {
     /// Creates the playlist `name`, or replaces its songs when it exists (no-op when already identical).
     @discardableResult
     func upsertPlaylist(named name: String, songIds: [String]) async throws -> Playlist {
-        let client = try requireClient()
         let database = try requireDatabase()
         let existing = try await database.pool.read { db in try LibraryQueries.playlists(db) }.first { $0.name == name }
         if let existing, try await playlistSongIds(database, id: existing.id) == songIds { return existing }
+        if let existing, isLocalOnly(existing.id) {
+            try await replaceEntries(database, playlistId: existing.id, songIds: songIds)
+            try await refreshLocalSummary(database, playlistId: existing.id)
+            return existing
+        }
+        if existing == nil, client == nil || songIds.contains(where: { YouTubeID.isYouTube($0) }) {
+            return try await createLocalPlaylist(name: name, songIds: songIds)
+        }
+        let client = try requireClient()
         let (playlist, songs) = try await client.createPlaylist(name: existing == nil ? name : nil,
                                                                 playlistId: existing?.id, songIds: songIds)
         if songs.isEmpty && !songIds.isEmpty {
@@ -492,8 +541,12 @@ final class LibraryRepository {
     }
 
     func renamePlaylist(id: String, name: String) async throws {
-        let client = try requireClient()
         let database = try requireDatabase()
+        if isLocalOnly(id) {
+            try await write(database, "UPDATE playlist SET name = ?, changed = ? WHERE id = ?", [name, Date(), id])
+            return
+        }
+        let client = try requireClient()
         do {
             try await client.updatePlaylist(id: id, name: name)
             try await write(database, "UPDATE playlist SET name = ? WHERE id = ?", [name, id])
@@ -504,10 +557,9 @@ final class LibraryRepository {
     }
 
     func deletePlaylist(id: String) async throws {
-        let client = try requireClient()
         let database = try requireDatabase()
         do {
-            try await client.deletePlaylist(id: id)
+            if !isLocalOnly(id) { try await requireClient().deletePlaylist(id: id) }
             try await database.pool.write { db in
                 try db.execute(sql: "DELETE FROM playlistEntry WHERE playlistId = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM playlist WHERE id = ?", arguments: [id])
@@ -520,6 +572,16 @@ final class LibraryRepository {
 
     func addToPlaylist(id: String, songIds: [String]) async throws {
         guard !songIds.isEmpty else { return }
+        if isLocalOnly(id) {
+            let database = try requireDatabase()
+            try await replaceEntries(database, playlistId: id, songIds: try await playlistSongIds(database, id: id) + songIds)
+            try await refreshLocalSummary(database, playlistId: id)
+            return
+        }
+        guard !songIds.contains(where: { YouTubeID.isYouTube($0) }) else {
+            report(LibraryError.youTubeOnServer, "Could not add to playlist")
+            throw LibraryError.youTubeOnServer
+        }
         let client = try requireClient()
         do {
             try await client.updatePlaylist(id: id, songIdsToAdd: songIds)
@@ -533,11 +595,15 @@ final class LibraryRepository {
     /// `indexes` are positions in the playlist (0-based, as displayed).
     func removeFromPlaylist(id: String, indexes: [Int]) async throws {
         guard !indexes.isEmpty else { return }
-        let client = try requireClient()
         let database = try requireDatabase()
         let removed = Set(indexes)
         let before = try await playlistSongIds(database, id: id)
         try await replaceEntries(database, playlistId: id, songIds: before.enumerated().filter { !removed.contains($0.offset) }.map(\.element))
+        if isLocalOnly(id) {
+            try await refreshLocalSummary(database, playlistId: id)
+            return
+        }
+        let client = try requireClient()
         do {
             try await client.updatePlaylist(id: id, songIndexesToRemove: indexes)
         } catch {
@@ -553,7 +619,6 @@ final class LibraryRepository {
 
     /// Reorders entries (SwiftUI `onMove` semantics: `destination` is the index in the original array).
     func movePlaylistEntries(id: String, from source: IndexSet, to destination: Int) async throws {
-        let client = try requireClient()
         let database = try requireDatabase()
         let before = try await playlistSongIds(database, id: id)
         var items = before
@@ -562,6 +627,8 @@ final class LibraryRepository {
         let shift = source.filter { $0 < destination }.count
         items.insert(contentsOf: moving, at: max(0, min(items.count, destination - shift)))
         try await replaceEntries(database, playlistId: id, songIds: items)
+        if isLocalOnly(id) { return }
+        let client = try requireClient()
         do {
             try await client.createPlaylist(playlistId: id, songIds: items)
         } catch {
@@ -587,6 +654,8 @@ final class LibraryRepository {
     }
 
     func refreshPlaylist(id: String) async throws {
+        // YouTube playlists are refreshed by YouTubeLibrary; on-device ones have nothing to refresh from.
+        if isLocalOnly(id) { return }
         let client = try requireClient()
         let database = try requireDatabase()
         let (playlist, songs) = try await client.getPlaylist(id: id)
@@ -631,6 +700,37 @@ final class LibraryRepository {
     private func write(_ database: LibraryDatabase, _ sql: String, _ arguments: [(any DatabaseValueConvertible)?]) async throws {
         try await database.pool.write { db in
             try db.execute(sql: sql, arguments: StatementArguments(arguments))
+        }
+    }
+
+    private func createLocalPlaylist(name: String, songIds: [String]) async throws -> Playlist {
+        let database = try requireDatabase()
+        let now = Date()
+        let playlist = Playlist(id: YouTubeID.newLocalPlaylistId(), name: name, songCount: songIds.count, created: now, changed: now)
+        do {
+            try await database.pool.write { db in try playlist.insert(db) }
+            try await replaceEntries(database, playlistId: playlist.id, songIds: songIds)
+            try await refreshLocalSummary(database, playlistId: playlist.id)
+            return playlist
+        } catch {
+            report(error, "Could not create playlist")
+            throw error
+        }
+    }
+
+    /// Length, duration and cover of an on-device playlist, from its songs.
+    private func refreshLocalSummary(_ database: LibraryDatabase, playlistId: String) async throws {
+        try await database.pool.write { db in
+            try db.execute(sql: """
+                UPDATE playlist SET
+                    songCount = (SELECT COUNT(*) FROM playlistEntry WHERE playlistId = ?1),
+                    duration = (SELECT COALESCE(SUM(song.duration), 0) FROM playlistEntry
+                                JOIN song ON song.id = playlistEntry.songId WHERE playlistId = ?1),
+                    coverArt = COALESCE(coverArt, (SELECT song.coverArt FROM playlistEntry JOIN song ON song.id = playlistEntry.songId
+                                                   WHERE playlistId = ?1 ORDER BY position LIMIT 1)),
+                    changed = ?2
+                WHERE id = ?1
+                """, arguments: [playlistId, Date()])
         }
     }
 

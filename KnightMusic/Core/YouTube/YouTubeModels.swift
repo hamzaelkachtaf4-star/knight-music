@@ -3,7 +3,7 @@ import Foundation
 // Plain values parsed out of Innertube responses. Foundation-only so the parser is testable without the
 // app; `YouTubeMapping` turns them into the domain models stored in GRDB.
 
-struct YTTrack: Hashable, Sendable {
+struct YTTrack: Hashable, Codable, Sendable {
     var videoId: String
     var title: String
     var artist: String?
@@ -18,11 +18,11 @@ struct YTTrack: Hashable, Sendable {
     var isVideo = false
 }
 
-enum YTBrowseKind: String, Hashable, Sendable {
+enum YTBrowseKind: String, Hashable, Codable, Sendable {
     case album, artist, playlist, other
 }
 
-struct YTBrowseItem: Hashable, Sendable {
+struct YTBrowseItem: Hashable, Codable, Sendable {
     var browseId: String
     var title: String
     var subtitle: String
@@ -71,12 +71,12 @@ struct YTPlaylistPage: Sendable {
     var continuation: String?
 }
 
-enum YTShelfItem: Hashable, Sendable {
+enum YTShelfItem: Hashable, Codable, Sendable {
     case track(YTTrack)
     case browse(YTBrowseItem)
 }
 
-struct YTHomeShelf: Hashable, Sendable {
+struct YTHomeShelf: Hashable, Codable, Sendable {
     var title: String
     var items: [YTShelfItem]
 }

@@ -75,6 +75,23 @@ enum YouTubeStreamPicker {
         return renditions.first?.url
     }
 
+    /// The client googlevideo says minted a URL: `c=ANDROID_VR&cver=1.65.10` (query) or `/c/IOS/cver/21.29.1` (path).
+    static func mintingClient(of url: URL) -> (name: String, version: String?)? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let name = items.first { $0.name == "c" }?.value ?? url.path.firstMatch(of: #/\/c\/([A-Z_0-9]+)/#).map { String($0.output.1) }
+        let version = items.first { $0.name == "cver" }?.value ?? url.path.firstMatch(of: #/\/cver\/([0-9.]+)/#).map { String($0.output.1) }
+        guard let name, !name.isEmpty else { return nil }
+        return (name, version)
+    }
+
+    /// Only refusals about the song itself (age gate, region, takedown, private) are remembered as verdicts.
+    /// "Please sign in" and bot checks are about this client or this network right now, and must not stick.
+    static func permanentReason(_ response: YTPlayerResponse) -> String? {
+        guard response.status != "OK", let reason = response.reason else { return nil }
+        let permanent = #"\b(age|country|region|private|removed|terminated|copyright|no longer available|does not exist|isn.t available|not available in)\b"#
+        return reason.range(of: permanent, options: [.regularExpression, .caseInsensitive]) != nil ? reason : nil
+    }
+
     private static func attribute(_ name: String, in line: String) -> String? {
         guard let range = line.range(of: "\(name)=\"") else { return nil }
         let rest = line[range.upperBound...]
