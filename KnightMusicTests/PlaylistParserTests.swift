@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if canImport(KnightMusic)
+@testable import KnightMusic
+#endif
 
 final class PlaylistParserTests: XCTestCase {
     func testSpotifyURLDetectionAndIdExtraction() {
