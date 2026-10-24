@@ -1,26 +1,26 @@
 import Foundation
 
-public actor PlaylistImporter {
-    public static let shared = PlaylistImporter()
+actor PlaylistImporter {
+    static let shared = PlaylistImporter()
 
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
+    init(session: URLSession = .shared) {
         self.session = session
     }
 
     /// Determines if the input looks like a Spotify URL or URI
-    public static func isSpotifyURL(_ text: String) -> Bool {
+    static func isSpotifyURL(_ text: String) -> Bool {
         PlaylistParser.isSpotifyURL(text)
     }
 
     /// Parses either a Spotify URL or raw tracklist text into a playlist name and list of tracks
-    public func parse(input: String) async throws -> ParsedImport {
+    func parse(input: String) async throws -> ParsedImport {
         try await PlaylistParser.parse(input: input, session: session)
     }
 
     /// Matches parsed tracks on YouTube Music and writes them into the local library database
-    public func matchAndImport(
+    func matchAndImport(
         parsed: ParsedImport,
         client: YouTubeClient = .shared,
         database: LibraryDatabase,

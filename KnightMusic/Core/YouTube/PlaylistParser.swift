@@ -1,32 +1,32 @@
 import Foundation
 
-public struct ImportedTrack: Sendable, Hashable {
-    public let title: String
-    public let artist: String
+struct ImportedTrack: Sendable, Hashable {
+    let title: String
+    let artist: String
 
-    public init(title: String, artist: String = "") {
+    init(title: String, artist: String = "") {
         self.title = title
         self.artist = artist
     }
 }
 
-public struct ParsedImport: Sendable {
-    public let title: String
-    public let tracks: [ImportedTrack]
+struct ParsedImport: Sendable {
+    let title: String
+    let tracks: [ImportedTrack]
 
-    public init(title: String, tracks: [ImportedTrack]) {
+    init(title: String, tracks: [ImportedTrack]) {
         self.title = title
         self.tracks = tracks
     }
 }
 
-public enum PlaylistImporterError: LocalizedError {
+enum PlaylistImporterError: LocalizedError {
     case invalidSource
     case emptyPlaylist
     case noMatchesFound
     case fetchFailed(String)
 
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .invalidSource:
             return "Could not recognize a valid Spotify URL or tracklist."
@@ -40,15 +40,15 @@ public enum PlaylistImporterError: LocalizedError {
     }
 }
 
-public enum PlaylistParser {
+enum PlaylistParser {
     /// Determines if the input looks like a Spotify URL or URI
-    public static func isSpotifyURL(_ text: String) -> Bool {
+    static func isSpotifyURL(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.contains("spotify.com") || trimmed.hasPrefix("spotify:playlist:")
     }
 
     /// Extracts the Spotify playlist ID from URL or URI
-    public static func extractSpotifyPlaylistId(from text: String) -> String? {
+    static func extractSpotifyPlaylistId(from text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("spotify:playlist:") {
             return String(trimmed.dropFirst("spotify:playlist:".count))
@@ -60,7 +60,7 @@ public enum PlaylistParser {
     }
 
     /// Parses either a Spotify URL or raw tracklist text into a playlist name and list of tracks
-    public static func parse(input: String, session: URLSession = .shared) async throws -> ParsedImport {
+    static func parse(input: String, session: URLSession = .shared) async throws -> ParsedImport {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw PlaylistImporterError.emptyPlaylist }
 
@@ -72,7 +72,7 @@ public enum PlaylistParser {
     }
 
     /// Fetches and parses Spotify playlist via public embed endpoint without requiring credentials
-    public static func fetchAndParseSpotify(playlistId: String, session: URLSession = .shared) async throws -> ParsedImport {
+    static func fetchAndParseSpotify(playlistId: String, session: URLSession = .shared) async throws -> ParsedImport {
         guard let url = URL(string: "https://open.spotify.com/embed/playlist/\(playlistId)") else {
             throw PlaylistImporterError.invalidSource
         }
@@ -90,7 +90,7 @@ public enum PlaylistParser {
     }
 
     /// Parses Spotify embed HTML into a ParsedImport
-    public static func parseSpotify(html: String) throws -> ParsedImport {
+    static func parseSpotify(html: String) throws -> ParsedImport {
         var playlistTitle = "Spotify Playlist"
         var tracks: [ImportedTrack] = []
 
@@ -145,7 +145,7 @@ public enum PlaylistParser {
     }
 
     /// Parses raw text lines (e.g. pasted tracklist)
-    public static func parseTextTracklist(_ text: String) -> ParsedImport {
+    static func parseTextTracklist(_ text: String) -> ParsedImport {
         let lines = text.components(separatedBy: .newlines)
         var tracks: [ImportedTrack] = []
 
