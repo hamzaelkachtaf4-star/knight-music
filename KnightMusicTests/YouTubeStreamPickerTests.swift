@@ -94,6 +94,8 @@ final class YouTubeStreamPickerTests: XCTestCase {
     }
 
     func testExclusionKeysCoverEveryTier() throws {
+        let vision = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?c=VISIONOS&cver=1.02"))
+        XCTAssertEqual(YouTubeStreamPicker.exclusionKey(of: vision), "VISIONOS/1.02")
         let vr = try XCTUnwrap(URL(string: "https://rr1---sn-x.googlevideo.com/videoplayback?c=ANDROID_VR&cver=1.43.32"))
         XCTAssertEqual(YouTubeStreamPicker.exclusionKey(of: vr), "ANDROID_VR/1.43.32")
         let hls = try XCTUnwrap(URL(string: "https://manifest.googlevideo.com/api/manifest/hls_playlist/id/x/itag/234/playlist/index.m3u8"))

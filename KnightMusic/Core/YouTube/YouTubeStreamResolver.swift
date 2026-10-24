@@ -32,7 +32,7 @@ final class YouTubeStreamResolver: @unchecked Sendable {
     private static let exclusionTTL: TimeInterval = 10 * 60
     private static let cacheLimit = 64
 
-    private static let tiers: [YouTubeClient.PlayerIdentity] = [.androidVRLegacy, .androidVR]
+    private static let tiers: [YouTubeClient.PlayerIdentity] = [.visionOS, .androidVRLegacy, .androidVR]
 
     init(client: YouTubeClient = .shared, fallback: PipedFallback = PipedFallback()) {
         self.client = client

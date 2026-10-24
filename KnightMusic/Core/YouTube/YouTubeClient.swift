@@ -34,6 +34,15 @@ actor YouTubeClient {
         let userAgent: String
         let extra: [String: Any]
 
+        static let visionOS = PlayerIdentity(
+            name: "VISIONOS", clientId: "101", version: "1.02",
+            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+            extra: [
+                "deviceMake": "Apple",
+                "deviceModel": "RealityDevice17,1",
+                "osName": "visionOS",
+                "osVersion": "26.5.23O471"
+            ])
         static let androidVR = PlayerIdentity(
             name: "ANDROID_VR", clientId: "28", version: "1.65.10",
             userAgent: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
@@ -166,7 +175,10 @@ actor YouTubeClient {
         if let visitorData { client["visitorData"] = visitorData }
         let body: JSONObject = [
             "context": ["client": client, "user": ["lockedSafetyMode": false]],
-            "videoId": videoId, "contentCheckOk": true, "racyCheckOk": true,
+            "videoId": videoId,
+            "playbackContext": ["contentPlaybackContext": ["html5Preference": "HTML5_PREF_WANTS"]],
+            "contentCheckOk": true,
+            "racyCheckOk": true,
         ]
         var request = URLRequest(url: URL(string: "https://www.youtube.com/youtubei/v1/player?prettyPrint=false")!)
         request.httpMethod = "POST"
@@ -174,6 +186,7 @@ actor YouTubeClient {
         request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(identity.clientId, forHTTPHeaderField: "X-YouTube-Client-Name")
         request.setValue(identity.version, forHTTPHeaderField: "X-YouTube-Client-Version")
+        request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
         if let visitorData { request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         YouTubeAuth.sign(&request, with: session, origin: YouTubeAuth.wwwOrigin)
