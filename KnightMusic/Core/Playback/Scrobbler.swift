@@ -88,7 +88,8 @@ final class Scrobbler {
         submitted = true
         guard let services, let server = services.server else { return }
         let id = song.id
-        if services.isOffline {
+        // A YouTube play is recorded on the device: it never waits for the server.
+        if services.isOffline && !YouTubeID.isYouTube(id) {
             store(songId: id, time: time)
             return
         }

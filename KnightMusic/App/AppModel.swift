@@ -346,6 +346,7 @@ final class AppModel {
                 session = .failed(error.localizedDescription)
             }
         } else if standaloneEnabled {
+            if player.order.contains(where: { !YouTubeID.isYouTube($0.song.id) }) { player.clearPlayback() }
             activateStandalone()
         } else {
             session = .loggedOut

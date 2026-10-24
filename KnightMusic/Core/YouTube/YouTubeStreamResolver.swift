@@ -115,15 +115,16 @@ final class YouTubeStreamResolver: @unchecked Sendable {
             return try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: {
-                self.lock.withLock {
-                    guard let entry = self.inFlight[key], entry.task == task else { return }
+                let last: Bool = self.lock.withLock {
+                    guard let entry = self.inFlight[key], entry.task == task else { return false }
                     if entry.waiters <= 1 {
                         self.inFlight[key] = nil
-                        task.cancel()
-                    } else {
-                        self.inFlight[key]?.waiters -= 1
+                        return true
                     }
+                    self.inFlight[key]?.waiters -= 1
+                    return false
                 }
+                if last { task.cancel() }
             }
         }
     }

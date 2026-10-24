@@ -37,6 +37,8 @@ extension PlayerEngine {
             }
             return stream.url
         }
+        // A mixed queue may save ahead while the server is down; its server songs must wait for the server.
+        guard !services.isOffline else { return nil }
         return services.urls?.streamURL(songId: song.id, maxBitRate: quality.maxBitRate,
                                         format: quality.format ?? (quality.maxBitRate == nil ? "raw" : nil),
                                         timeOffset: nil)
