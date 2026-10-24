@@ -39,6 +39,8 @@ final class AppModel {
     /// Signed in to YouTube Music with Google (`YouTubeSession`); `youTubeAccount` is the profile once fetched.
     private(set) var isYouTubeSignedIn = YouTubeSession.shared.isSignedIn
     private(set) var youTubeAccount: YTAccount? = YouTubeSession.shared.current?.account
+    /// Controls presentation of the Google Sign-In sheet across the app.
+    var showingGoogleSignIn = false
     /// False when the last reachability check (ping on any address) failed.
     private(set) var serverReachable = true
     /// Bumps on every client/database change; observe it from views that must rebuild on account switch.
@@ -392,7 +394,9 @@ final class AppModel {
     /// reloads the Home feed as the signed-in user.
     func youTubeDidSignIn() {
         isYouTubeSignedIn = true
+        showingGoogleSignIn = false
         youTubeAccount = YouTubeSession.shared.current?.account
+        YouTubeStreamResolver.shared.invalidateAll()
         if !isStandalone && activeAccount == nil { startStandalone() }
         Task {
             await refreshYouTubeAccount()
@@ -404,6 +408,7 @@ final class AppModel {
         YouTubeSession.shared.signOut()
         isYouTubeSignedIn = false
         youTubeAccount = nil
+        YouTubeStreamResolver.shared.invalidateAll()
         Task { await youtube.loadHome(force: true) }
     }
 

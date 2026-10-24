@@ -48,6 +48,10 @@ struct HomeView: View {
                         SongColumnsShelf(title: "Continue Listening", songs: continueListening.value, route: .songList(.recentlyPlayed))
                     }
 
+                    if app.isStandalone && !app.isYouTubeSignedIn {
+                        youTubeConnectCard
+                    }
+
                     if app.isStandalone {
                         YouTubeHomeShelves()
                     }
@@ -268,6 +272,38 @@ struct HomeView: View {
             action: { Task { await app.pullToRefresh() } }
         )
         .padding(.top, 60)
+    }
+
+    @ViewBuilder
+    private var youTubeConnectCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 32))
+                    .foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connect YouTube Music")
+                        .font(.headline)
+                        .foregroundStyle(Theme.label)
+                    Text("Sign in with Google to stream music and load your personal recommendations.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryLabel)
+                }
+            }
+            Button {
+                Haptics.impact(.medium)
+                app.showingGoogleSignIn = true
+            } label: {
+                Label("Sign in with Google", systemImage: "person.badge.key.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+            }
+            .buttonStyle(.glassProminent)
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .padding(.horizontal, Theme.margin)
     }
 
     // MARK: - Toolbar

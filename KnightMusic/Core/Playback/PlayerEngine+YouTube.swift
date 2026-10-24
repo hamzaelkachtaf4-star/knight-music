@@ -120,7 +120,11 @@ extension PlayerEngine {
         failedEntryIds.insert(entry.id)
         isBuffering = false
         formatDescription = "YouTube Music"
-        report("Couldn\u{2019}t play \u{201C}\(entry.song.title)\u{201D}: \(error.localizedDescription)")
+        if !YouTubeSession.shared.isSignedIn {
+            report("Sign in with Google on Home to stream \u{201C}\(entry.song.title)\u{201D} without bot restrictions.")
+        } else {
+            report("Couldn\u{2019}t play \u{201C}\(entry.song.title)\u{201D}: \(error.localizedDescription)")
+        }
         consecutiveFailures += 1
         guard userWantsPlaying, consecutiveFailures < min(max(order.count, 1), 5), let next = nextExplicitIndex() else {
             userWantsPlaying = false

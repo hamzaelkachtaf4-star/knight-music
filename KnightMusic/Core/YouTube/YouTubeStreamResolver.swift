@@ -83,6 +83,14 @@ final class YouTubeStreamResolver: @unchecked Sendable {
         lock.withLock { cache[videoId] = nil }
     }
 
+    func invalidateAll() {
+        lock.withLock {
+            cache.removeAll()
+            verdicts.removeAll()
+            excluded.removeAll()
+        }
+    }
+
     // MARK: Coalescing
 
     private func coalesced(_ videoId: String, key: String,

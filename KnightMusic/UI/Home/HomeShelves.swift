@@ -125,6 +125,27 @@ struct AccountAvatarMenu: View {
                         }
                     }
                 }
+            } else if app.isStandalone {
+                if app.isYouTubeSignedIn {
+                    Section(app.youTubeAccount?.name ?? "YouTube Music") {
+                        if let detail = app.youTubeAccount?.handle ?? app.youTubeAccount?.email {
+                            Text(detail)
+                        }
+                        Button(role: .destructive) {
+                            Haptics.impact(.light)
+                            app.signOutOfYouTube()
+                        } label: {
+                            Label("Sign Out of Google", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
+                } else {
+                    Button {
+                        Haptics.impact(.medium)
+                        app.showingGoogleSignIn = true
+                    } label: {
+                        Label("Sign in with Google", systemImage: "person.badge.key.fill")
+                    }
+                }
             }
             Button {
                 ui?.selectedTab = .settings
@@ -136,13 +157,16 @@ struct AccountAvatarMenu: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(Theme.accent.gradient))
+                .background(Circle().fill(app.isYouTubeSignedIn ? Color.red.gradient : Theme.accent.gradient))
         }
         .accessibilityLabel("Account")
     }
 
     private var initials: String {
-        let source = app.activeAccount?.username ?? app.activeAccount?.name ?? "K"
+        if app.isStandalone, let name = app.youTubeAccount?.name, !name.isEmpty {
+            return String(name.prefix(1)).uppercased()
+        }
+        let source = app.activeAccount?.username ?? app.activeAccount?.name ?? (app.isStandalone ? "YT" : "K")
         return String(source.prefix(1)).uppercased()
     }
 }

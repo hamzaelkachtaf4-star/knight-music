@@ -39,11 +39,24 @@ struct MainTabsView: View {
     ]
 
     var body: some View {
+        @Bindable var app = app
+
         Group {
             if horizontalSizeClass == .regular {
                 regularTabs
             } else {
                 compactTabs
+            }
+        }
+        .sheet(isPresented: $app.showingGoogleSignIn) {
+            YouTubeLoginSheet()
+        }
+        .task {
+            if app.isStandalone && !app.isYouTubeSignedIn {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if app.isStandalone && !app.isYouTubeSignedIn {
+                    app.showingGoogleSignIn = true
+                }
             }
         }
         .onChange(of: horizontalSizeClass) { _, newSizeClass in

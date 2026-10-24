@@ -156,6 +156,34 @@ struct SearchView: View {
     @ViewBuilder
     private var emptyQueryView: some View {
         VStack(alignment: .leading, spacing: 28) {
+            if app.isStandalone && !app.isYouTubeSignedIn {
+                Button {
+                    Haptics.impact(.medium)
+                    app.showingGoogleSignIn = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sign in with Google")
+                                .font(.headline)
+                                .foregroundStyle(Theme.label)
+                            Text("Unlock full streaming & your YouTube Music library")
+                                .font(.caption)
+                                .foregroundStyle(Theme.secondaryLabel)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.secondaryLabel)
+                    }
+                    .padding(14)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                    .padding(.horizontal, Theme.margin)
+                }
+                .buttonStyle(.plain)
+            }
             if !recentSearches.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
