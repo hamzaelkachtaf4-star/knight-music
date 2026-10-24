@@ -60,7 +60,9 @@ extension PlayerEngine {
             guard !services.isInternetOffline, let stream = YouTubeStreamResolver.shared.cachedStream(for: videoId) else { return nil }
             var parts = ["Streaming", "AAC"]
             if stream.kbps > 0 { parts.append("\(stream.kbps) kbps") }
-            return ResolvedSource(url: stream.url, kind: .streaming, quality: nil, description: parts.joined(separator: " \u{2022} "))
+            return ResolvedSource(url: stream.url, kind: .streaming, quality: nil,
+                                  contentLength: stream.contentLength,
+                                  description: parts.joined(separator: " \u{2022} "))
         }
         guard !services.isOffline else { return nil }
         let q = currentQuality()
@@ -231,7 +233,7 @@ extension PlayerEngine {
     func makePrepared(entry: QueueEntry, resolved: ResolvedSource) -> PreparedItem {
         // googlevideo files are only served in ≤1 MiB ranges: stream them through the chunking loader.
         let loader = resolved.kind == .streaming && YouTubeStream.needsChunking(resolved.url)
-            ? ChunkedStreamLoader(remote: resolved.url) : nil
+            ? ChunkedStreamLoader(remote: resolved.url, length: resolved.contentLength) : nil
         let item = AVPlayerItem(asset: loader?.makeAsset() ?? AVURLAsset(url: resolved.url))
         let prepared = PreparedItem(item: item, entry: entry, resolved: resolved)
         prepared.streamLoader = loader

@@ -11,6 +11,7 @@ struct PlaylistsView: View {
     @State private var playlistToDelete: Playlist?
     @State private var showDeleteConfirmation = false
     @State private var showSmartSheet = false
+    @State private var showImportSheet = false
     @AppStorage("playlists.sort") private var sort: PlaylistSort = .name
 
     enum PlaylistSort: String, CaseIterable, Identifiable {
@@ -110,6 +111,11 @@ struct PlaylistsView: View {
                         Label("New Playlist", systemImage: "music.note.list")
                     }
                     Button {
+                        showImportSheet = true
+                    } label: {
+                        Label("Import Playlist (Spotify / Text)", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
                         showSmartSheet = true
                     } label: {
                         Label("New Smart Playlist", systemImage: "gearshape.2")
@@ -163,6 +169,9 @@ struct PlaylistsView: View {
         }
         .sheet(isPresented: $showSmartSheet) {
             SmartPlaylistSheet()
+        }
+        .sheet(isPresented: $showImportSheet) {
+            ImportPlaylistSheet()
         }
         .confirmationDialog(
             "Delete Playlist",

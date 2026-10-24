@@ -202,21 +202,16 @@ final class YouTubeStreamResolver: @unchecked Sendable {
 
     // MARK: Helpers
 
-    /// Fetches a whole chunk at the 1 MiB boundary when the file is that long: some URLs serve the opening
-    /// megabyte (and small reads past it) yet refuse real-sized reads after it, so the probe must be as large
-    /// as the fetches playback will make.
+    /// Fast probe to verify URL responsiveness and byte-range support without downloading large chunks.
     private func probe(_ url: URL, length: Int?) async -> Bool {
-        let chunk = YouTubeStream.chunkSize
-        let total = length ?? YouTubeStream.contentLength(of: url) ?? 0
-        let range = total > chunk ? chunk...(min(total, 2 * chunk) - 1) : 0...(max(min(total, chunk), 16_384) - 1)
         var request = URLRequest(url: url)
-        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
+        request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
         do {
             let (data, response) = try await probeSession.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 206 || http.statusCode == 200 else { return false }
             let type = http.mimeType?.lowercased() ?? ""
             let typeOK = type.hasPrefix("audio/") || type.hasPrefix("video/") || type == "application/octet-stream"
-            return typeOK && (total == 0 ? !data.isEmpty : data.count >= min(range.count, total - range.lowerBound))
+            return typeOK && !data.isEmpty
         } catch {
             return false
         }

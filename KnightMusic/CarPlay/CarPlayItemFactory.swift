@@ -42,7 +42,7 @@ final class CarPlayPlayableFilter {
                     sql: """
                     SELECT DISTINCT albumId FROM song
                     WHERE albumId IS NOT NULL
-                    AND (id IN (SELECT songId FROM download WHERE state = 'done')
+                    AND (id IN (SELECT songId FROM download WHERE state = 'completed' OR state = 'done')
                          OR id IN (SELECT songId FROM cachedSong))
                     """
                 )
@@ -62,7 +62,7 @@ final class CarPlayPlayableFilter {
                     db,
                     sql: """
                     SELECT DISTINCT playlistId FROM playlistEntry
-                    WHERE songId IN (SELECT songId FROM download WHERE state = 'done')
+                    WHERE songId IN (SELECT songId FROM download WHERE state = 'completed' OR state = 'done')
                        OR songId IN (SELECT songId FROM cachedSong)
                     """
                 )
@@ -83,7 +83,7 @@ final class CarPlayPlayableFilter {
                     sql: """
                     SELECT DISTINCT artistId FROM song
                     WHERE artistId IS NOT NULL
-                    AND (id IN (SELECT songId FROM download WHERE state = 'done')
+                    AND (id IN (SELECT songId FROM download WHERE state = 'completed' OR state = 'done')
                          OR id IN (SELECT songId FROM cachedSong))
                     """
                 )

@@ -1,5 +1,8 @@
 import Foundation
 import GRDB
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum DownloadState: String, Codable, Sendable {
     case queued, downloading, completed, failed
@@ -106,12 +109,25 @@ final class DownloadManager {
 
     func status(for songId: String) -> DownloadStatus? { statuses[songId] }
 
-    func isDownloaded(_ songId: String) -> Bool { statuses[songId]?.state == .completed }
+    func isDownloaded(_ songId: String) -> Bool {
+        if statuses[songId]?.state == .completed { return true }
+        return localFileURL(for: songId) != nil
+    }
 
     func localFileURL(for songId: String) -> URL? {
-        guard statuses[songId]?.state == .completed, let rel = paths[songId] else { return nil }
-        let url = directory.appendingPathComponent(rel)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        if statuses[songId]?.state == .completed, let rel = paths[songId] {
+            let url = directory.appendingPathComponent(rel)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        // Disk fallback when offline or before in-memory cache is fully initialized
+        let safe = safeFileComponent(songId)
+        for ext in ["m4a", "mp3", "flac"] {
+            let candidate = directory.appendingPathComponent("\(safe).\(ext)")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     func downloadedSongs() async -> [Song] {
@@ -249,7 +265,26 @@ final class DownloadManager {
         persist(id)
         let dest = directory.appendingPathComponent(rel)
         let token = UUID()
+
+        #if canImport(UIKit)
+        var bgTaskID = UIBackgroundTaskIdentifier.invalid
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "km-download-\(id)") {
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
+            }
+        }
+        #endif
+
         let task = Task { [weak self] in
+            defer {
+                #if canImport(UIKit)
+                if bgTaskID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTaskID)
+                    bgTaskID = .invalid
+                }
+                #endif
+            }
             var tmp: URL?
             do {
                 let stream = try await YouTubeStreamResolver.shared.resolveDownloadable(videoId)

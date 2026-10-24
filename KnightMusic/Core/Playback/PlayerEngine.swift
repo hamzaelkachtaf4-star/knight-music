@@ -22,6 +22,7 @@ struct ResolvedSource {
     var url: URL
     var kind: AudioSource
     var quality: StreamQuality?
+    var contentLength: Int? = nil
     var description: String
 }
 

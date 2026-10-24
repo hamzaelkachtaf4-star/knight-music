@@ -551,6 +551,22 @@ final class LibraryRepository {
         return playlist
     }
 
+    /// Imports a playlist from a Spotify URL or raw text tracklist, matches tracks on YouTube Music, and saves it locally.
+    @discardableResult
+    func importPlaylist(
+        input: String,
+        onProgress: (@Sendable (Int, Int, String) -> Void)? = nil
+    ) async throws -> (playlist: Playlist, count: Int) {
+        let database = try requireDatabase()
+        let parsed = try await PlaylistImporter.shared.parse(input: input)
+        let (playlist, songs) = try await PlaylistImporter.shared.matchAndImport(
+            parsed: parsed,
+            database: database,
+            onProgress: onProgress
+        )
+        return (playlist, songs.count)
+    }
+
     func renamePlaylist(id: String, name: String) async throws {
         let database = try requireDatabase()
         if isLocalOnly(id) {

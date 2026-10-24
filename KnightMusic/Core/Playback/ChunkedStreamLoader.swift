@@ -15,9 +15,9 @@ final class ChunkedStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @unche
     /// Only touched on `queue`.
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
-    init(remote: URL) {
+    init(remote: URL, length: Int? = nil) {
         self.remote = remote
-        length = YouTubeStream.contentLength(of: remote)
+        self.length = length ?? YouTubeStream.contentLength(of: remote)
     }
 
     deinit {
@@ -76,7 +76,9 @@ final class ChunkedStreamLoader: NSObject, AVAssetResourceLoaderDelegate, @unche
                 while offset < end {
                     try Task.checkCancellation()
                     if queue.sync(execute: { loadingRequest.isCancelled }) { throw CancellationError() }
-                    let upper = min(offset + YouTubeStream.chunkSize, end) - 1
+                    // Serve initial 256KB burst at offset 0 so AVPlayer starts playback almost immediately
+                    let step = (offset == 0 && end > 262_144) ? 262_144 : YouTubeStream.chunkSize
+                    let upper = min(offset + step, end) - 1
                     let bytes = try await fetch(offset...upper)
                     guard !bytes.isEmpty else { throw YouTubeError.badResponse }
                     try Task.checkCancellation()
