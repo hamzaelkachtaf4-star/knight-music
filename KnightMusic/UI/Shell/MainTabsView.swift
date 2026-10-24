@@ -10,6 +10,7 @@ struct MainTabsView: View {
     @Environment(PlayerEngine.self) private var player
     @Environment(TabNavigationModel.self) private var nav
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(HermesService.self) private var hermes: HermesService?
 
 
     private struct LibraryTabItem: Identifiable {
@@ -103,14 +104,27 @@ struct MainTabsView: View {
             .customizationID("tab.search")
             .customizationBehavior(.disabled, for: .sidebar, .tabBar)
 
-            Tab("Knight", systemImage: "sparkles", value: UIState.Tab.knight) {
-                NavigationStack(path: $nav.knight) {
-                    KnightView(path: $nav.knight)
-                        .withAppRoutes()
+            if hermes?.settings.isConfigured == true {
+                Tab("Knight", systemImage: "sparkles", value: UIState.Tab.knight) {
+                    NavigationStack(path: $nav.knight) {
+                        KnightView(path: $nav.knight)
+                            .withAppRoutes()
+                    }
                 }
+                .customizationID("tab.knight")
+                .customizationBehavior(.disabled, for: .sidebar, .tabBar)
+            } else {
+                Tab("Downloaded", systemImage: "arrow.down.circle", value: UIState.Tab.knight) {
+                    NavigationStack(path: $nav.knight) {
+                        SongListView(kind: .downloaded)
+                            .navigationTitle("Downloaded")
+                            .withAppRoutes()
+                    }
+                    .transfersIndicator()
+                }
+                .customizationID("tab.downloaded")
+                .customizationBehavior(.disabled, for: .sidebar, .tabBar)
             }
-            .customizationID("tab.knight")
-            .customizationBehavior(.disabled, for: .sidebar, .tabBar)
 
             Tab("Settings", systemImage: "gearshape", value: UIState.Tab.settings) {
                 NavigationStack(path: $nav.settings) {
@@ -178,14 +192,27 @@ struct MainTabsView: View {
             .customizationID("compact.tab.library")
             .customizationBehavior(.disabled, for: .sidebar, .tabBar)
 
-            Tab("Knight", systemImage: "sparkles", value: UIState.Tab.knight) {
-                NavigationStack(path: $nav.knight) {
-                    KnightView(path: $nav.knight)
-                        .withAppRoutes()
+            if hermes?.settings.isConfigured == true {
+                Tab("Knight", systemImage: "sparkles", value: UIState.Tab.knight) {
+                    NavigationStack(path: $nav.knight) {
+                        KnightView(path: $nav.knight)
+                            .withAppRoutes()
+                    }
                 }
+                .customizationID("compact.tab.knight")
+                .customizationBehavior(.disabled, for: .sidebar, .tabBar)
+            } else {
+                Tab("Downloaded", systemImage: "arrow.down.circle", value: UIState.Tab.knight) {
+                    NavigationStack(path: $nav.knight) {
+                        SongListView(kind: .downloaded)
+                            .navigationTitle("Downloaded")
+                            .withAppRoutes()
+                    }
+                    .transfersIndicator()
+                }
+                .customizationID("compact.tab.downloaded")
+                .customizationBehavior(.disabled, for: .sidebar, .tabBar)
             }
-            .customizationID("compact.tab.knight")
-            .customizationBehavior(.disabled, for: .sidebar, .tabBar)
 
             Tab("Settings", systemImage: "gearshape", value: UIState.Tab.settings) {
                 NavigationStack(path: $nav.settings) {
