@@ -1,4 +1,5 @@
 import SwiftUI
+import NukeUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
@@ -6,6 +7,7 @@ struct SettingsView: View {
 
     @State private var serverInfo = ServerInfoFetcher.shared
     @State private var showingLogoutConfirmation = false
+    @State private var showingGoogleSignIn = false
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
@@ -43,6 +45,18 @@ struct SettingsView: View {
             return "\(type) (API \(apiVersion))"
         }
         return type
+    }
+
+    private var avatar: some View {
+        LazyImage(url: app.youTubeAccount?.avatarURL.flatMap(URL.init(string:))) { state in
+            if let image = state.image {
+                image.resizable().scaledToFill()
+            } else {
+                Image(systemName: "person.crop.circle.fill").resizable().foregroundStyle(Theme.secondaryLabel)
+            }
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(Circle())
     }
 
     var body: some View {
@@ -153,6 +167,48 @@ struct SettingsView: View {
             }
 
 
+            // YouTube Music's Google account
+            if app.isStandalone {
+                Section {
+                    if app.isYouTubeSignedIn {
+                        HStack(spacing: 12) {
+                            avatar
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(app.youTubeAccount?.name ?? "Google account")
+                                    .foregroundStyle(Theme.label)
+                                if let detail = app.youTubeAccount?.handle ?? app.youTubeAccount?.email {
+                                    Text(detail)
+                                        .font(.subheadline)
+                                        .foregroundStyle(Theme.secondaryLabel)
+                                }
+                            }
+                        }
+                        Button {
+                            Haptics.impact(.light)
+                            app.signOutOfYouTube()
+                        } label: {
+                            Text("Sign Out")
+                                .foregroundStyle(Theme.accent)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else {
+                        Button {
+                            showingGoogleSignIn = true
+                        } label: {
+                            Text("Sign in with Google")
+                                .foregroundStyle(Theme.accent)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                } header: {
+                    Text("YouTube Music")
+                } footer: {
+                    Text(app.isYouTubeSignedIn
+                         ? "Home and playback requests use your Google account."
+                         : "Sign in to get your own Home feed and account-signed playback.")
+                }
+            }
+
             // 5. Log Out row
             Section {
                 Button(role: .destructive) {
@@ -200,6 +256,10 @@ struct SettingsView: View {
         .task {
             await serverInfo.fetchIfNeeded(app: app)
         }
+        .task(id: app.isYouTubeSignedIn) {
+            if app.isYouTubeSignedIn, app.youTubeAccount == nil { await app.refreshYouTubeAccount() }
+        }
+        .sheet(isPresented: $showingGoogleSignIn) { YouTubeLoginSheet() }
         .refreshable {
             await serverInfo.fetchIfNeeded(app: app)
         }

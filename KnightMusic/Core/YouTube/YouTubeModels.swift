@@ -80,3 +80,20 @@ struct YTHomeShelf: Hashable, Codable, Sendable {
     var title: String
     var items: [YTShelfItem]
 }
+
+/// The signed-in Google account as YouTube Music's account menu describes it.
+struct YTAccount: Hashable, Codable, Sendable {
+    var name: String
+    var handle: String?
+    var email: String?
+    var avatarURL: String?
+}
+
+/// What the sign-in captured: the YouTube cookies, which Google account slot they belong to and the visitor
+/// id of the logged-in page. Persisted as one Keychain item.
+struct YouTubeSessionData: Codable, Equatable, Sendable {
+    var cookies: [String: String]
+    var authUser = "0"
+    var visitorData: String?
+    var account: YTAccount?
+}

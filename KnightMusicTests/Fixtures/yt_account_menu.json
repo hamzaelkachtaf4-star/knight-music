@@ -1,0 +1,22 @@
+{
+  "responseContext": {"visitorData": "CgtBY2NvdW50VGVzdA%3D%3D"},
+  "actions": [{
+    "openPopupAction": {
+      "popup": {
+        "multiPageMenuRenderer": {
+          "header": {
+            "activeAccountHeaderRenderer": {
+              "accountName": {"runs": [{"text": "Hamza K"}]},
+              "email": {"runs": [{"text": "hamza@example.com"}]},
+              "channelHandle": {"runs": [{"text": "@hamzak"}]},
+              "accountPhoto": {"thumbnails": [
+                {"url": "https://yt3.ggpht.com/photo=s48", "width": 48, "height": 48},
+                {"url": "https://yt3.ggpht.com/photo=s88", "width": 88, "height": 88}
+              ]}
+            }
+          }
+        }
+      }
+    }
+  }]
+}

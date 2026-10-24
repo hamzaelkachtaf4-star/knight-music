@@ -12,6 +12,7 @@ struct LoginView: View {
     @State private var isAdditionalExpanded = false
     @State private var isConnecting = false
     @State private var errorMessage: String?
+    @State private var showingGoogleSignIn = false
 
     struct AdditionalAddressItem: Identifiable {
         let id = UUID()
@@ -86,7 +87,18 @@ struct LoginView: View {
                         }
                         .buttonStyle(.glassProminent)
 
-                        Text("No server or account needed. Search, play and save songs on this device.")
+                        Button {
+                            Haptics.impact(.light)
+                            showingGoogleSignIn = true
+                        } label: {
+                            Label("Sign in with Google", systemImage: "person.crop.circle.badge.checkmark")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                        }
+                        .buttonStyle(.glass)
+
+                        Text("No server or account needed. Search, play and save songs on this device. Sign in with Google to use your YouTube Music account.")
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.secondaryLabel)
                             .multilineTextAlignment(.center)
@@ -245,6 +257,7 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.background.ignoresSafeArea())
+        .sheet(isPresented: $showingGoogleSignIn) { YouTubeLoginSheet() }
     }
 
     private func connect() {

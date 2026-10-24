@@ -13,6 +13,7 @@ SOURCES=(
   KnightMusic/Core/YouTube/YouTubeParser.swift
   KnightMusic/Core/YouTube/YouTubeStreamPicker.swift
   KnightMusic/Core/YouTube/YouTubeStream.swift
+  KnightMusic/Core/YouTube/YouTubeAuth.swift
   KnightMusic/Core/Lyrics/LyricsDocument.swift
   KnightMusic/Core/Lyrics/TtmlParser.swift
   KnightMusic/Core/Lyrics/LrcParser.swift

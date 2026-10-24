@@ -187,6 +187,39 @@ enum YouTubeParser {
         }
     }
 
+    // MARK: Account
+
+    /// The `account/account_menu` header: display name, @handle, email and the largest avatar.
+    static func account(from root: JSONObject) -> YTAccount? {
+        guard let header = InnertubeJSON.collect("activeAccountHeaderRenderer", in: root).first else { return nil }
+        let name = header.runs("accountName")
+        guard !name.isEmpty else { return nil }
+        let handle = header.runs("channelHandle")
+        let email = header.runs("email")
+        return YTAccount(name: name,
+                         handle: handle.isEmpty ? nil : handle,
+                         email: email.isEmpty ? nil : email,
+                         avatarURL: header.o("accountPhoto")?.bestThumbnail)
+    }
+
+    /// The playlists on the Library → Playlists page (`FEmusic_liked_playlists`), in page order. The "New
+    /// playlist" tile has no browse endpoint and drops out.
+    static func libraryPlaylists(from root: JSONObject) -> [YTBrowseItem] {
+        var seen = Set<String>()
+        var playlists: [YTBrowseItem] = []
+        func add(_ item: YTBrowseItem?) {
+            guard let item, item.kind == .playlist, seen.insert(item.browseId).inserted else { return }
+            playlists.append(item)
+        }
+        for tile in InnertubeJSON.collect("musicTwoRowItemRenderer", in: root) {
+            if case .browse(let item)? = twoRowItem(tile) { add(item) }
+        }
+        for row in InnertubeJSON.collect("musicResponsiveListItemRenderer", in: root) {
+            add(browseItem(row))
+        }
+        return playlists
+    }
+
     // MARK: Session
 
     static func visitorData(_ root: JSONObject) -> String? {

@@ -6,6 +6,7 @@ enum YouTubeError: LocalizedError {
     case notFound
     case unplayable(String)
     case noStream
+    case notSignedIn
 
     var errorDescription: String? {
         switch self {
@@ -14,12 +15,14 @@ enum YouTubeError: LocalizedError {
         case .notFound: return "YouTube Music doesn’t have this item."
         case .unplayable(let reason): return reason
         case .noStream: return "YouTube Music offered no playable audio for this song."
+        case .notSignedIn: return "Google didn’t finish signing you in to YouTube Music."
         }
     }
 }
 
-/// Anonymous YouTube Music (Innertube) client: search, browse and radio through the WEB_REMIX web client,
-/// and `player` requests through the device clients the stream resolver picks. No account, no API key.
+/// YouTube Music (Innertube) client: search, browse and radio through the WEB_REMIX web client, and `player`
+/// requests through the device clients the stream resolver picks. Anonymous until the user signs in with Google
+/// (`YouTubeSession`); then browse and player requests carry the session's Cookie, SAPISIDHASH and X-Goog-AuthUser.
 actor YouTubeClient {
     static let shared = YouTubeClient()
 
@@ -120,6 +123,18 @@ actor YouTubeClient {
         YouTubeParser.home(try await music("browse", ["browseId": "FEmusic_home"]))
     }
 
+    /// The signed-in account's name, handle and avatar.
+    func account() async throws -> YTAccount {
+        let json = try await music("account/account_menu", [:])
+        guard let account = YouTubeParser.account(from: json) else { throw YouTubeError.notSignedIn }
+        return account
+    }
+
+    /// The signed-in user's saved playlists (Your likes included).
+    func libraryPlaylists() async throws -> [YTBrowseItem] {
+        YouTubeParser.libraryPlaylists(from: try await music("browse", ["browseId": "FEmusic_liked_playlists"]))
+    }
+
     /// YouTube Music's radio after `videoId` (the RDAMVM mix), the seed first.
     func radio(after videoId: String) async throws -> [YTTrack] {
         YouTubeParser.watchQueue(try await music("next", [
@@ -129,9 +144,23 @@ actor YouTubeClient {
 
     // MARK: Player
 
+    /// Signed with the Google session when there is one. The device clients (ANDROID_VR, IOS) don't all
+    /// accept account cookies, so a session that gets no playable answer is retried once anonymously.
     func player(videoId: String, as identity: PlayerIdentity) async throws -> YTPlayerResponse {
-        // A cold launch can resolve a restored song before any browse call minted a visitor id.
-        if visitorData == nil { await mintVisitorData() }
+        guard let session = YouTubeSession.shared.current else {
+            return try await playerRequest(videoId: videoId, identity: identity, session: nil)
+        }
+        do {
+            let response = try await playerRequest(videoId: videoId, identity: identity, session: session)
+            if response.isPlayable { return response }
+        } catch YouTubeError.http(let code) where code == 400 || code == 401 || code == 403 {
+            Log.app.warning("YouTube player refused the signed-in session (\(code)); retrying anonymously")
+        }
+        return try await playerRequest(videoId: videoId, identity: identity, session: nil)
+    }
+
+    private func playerRequest(videoId: String, identity: PlayerIdentity, session: YouTubeSessionData?) async throws -> YTPlayerResponse {
+        let visitorData = await resolveVisitorData(for: session)
         var client: JSONObject = ["clientName": identity.name, "clientVersion": identity.version, "hl": language, "gl": region]
         for (key, value) in identity.extra { client[key] = value }
         if let visitorData { client["visitorData"] = visitorData }
@@ -147,6 +176,7 @@ actor YouTubeClient {
         request.setValue(identity.version, forHTTPHeaderField: "X-YouTube-Client-Version")
         if let visitorData { request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        YouTubeAuth.sign(&request, with: session, origin: YouTubeAuth.wwwOrigin)
         return YouTubeStreamPicker.playerResponse(try await send(request))
     }
 
@@ -164,7 +194,8 @@ actor YouTubeClient {
     // MARK: Plumbing
 
     private func music(_ endpoint: String, _ extras: JSONObject, query: [String: String] = [:]) async throws -> JSONObject {
-        if visitorData == nil { await mintVisitorData() }
+        let session = YouTubeSession.shared.current
+        let visitorData = await resolveVisitorData(for: session)
         var components = URLComponents(url: Self.musicBase.appendingPathComponent(endpoint), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "prettyPrint", value: "false")] + query.map { URLQueryItem(name: $0.key, value: $0.value) }
         var client: JSONObject = ["clientName": "WEB_REMIX", "clientVersion": Self.webRemixVersion, "hl": language, "gl": region]
@@ -182,10 +213,19 @@ actor YouTubeClient {
         request.setValue(Self.webRemixVersion, forHTTPHeaderField: "X-YouTube-Client-Version")
         if let visitorData { request.setValue(visitorData, forHTTPHeaderField: "X-Goog-Visitor-Id") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        YouTubeAuth.sign(&request, with: session, origin: YouTubeAuth.musicOrigin)
 
         let json = try await sendWithRetry(request)
-        if visitorData == nil, let minted = YouTubeParser.visitorData(json) { visitorData = minted }
+        if session == nil, self.visitorData == nil, let minted = YouTubeParser.visitorData(json) { self.visitorData = minted }
         return json
+    }
+
+    /// The signed-in page's own visitor id when it has one; otherwise a minted anonymous one. A cold launch can
+    /// resolve a restored song before any browse call minted one.
+    private func resolveVisitorData(for session: YouTubeSessionData?) async -> String? {
+        if let signed = session?.visitorData { return signed }
+        if visitorData == nil { await mintVisitorData() }
+        return visitorData
     }
 
     /// A visitor id makes `player` requests look like a real session; without one Google may hand out URLs

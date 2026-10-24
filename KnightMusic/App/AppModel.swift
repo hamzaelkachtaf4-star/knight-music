@@ -36,6 +36,9 @@ final class AppModel {
     private(set) var activeAccount: ServerAccount?
     /// True when the library is the on-device YouTube Music one (no Navidrome account active).
     private(set) var isStandalone = false
+    /// Signed in to YouTube Music with Google (`YouTubeSession`); `youTubeAccount` is the profile once fetched.
+    private(set) var isYouTubeSignedIn = YouTubeSession.shared.isSignedIn
+    private(set) var youTubeAccount: YTAccount? = YouTubeSession.shared.current?.account
     /// False when the last reachability check (ping on any address) failed.
     private(set) var serverReachable = true
     /// Bumps on every client/database change; observe it from views that must rebuild on account switch.
@@ -381,6 +384,38 @@ final class AppModel {
         teardownSession()
         session = .loggedOut
         notifySessionChanged()
+    }
+
+    // MARK: YouTube Music account
+
+    /// Called by the Google sign-in sheet once the session is saved: opens the on-device library if needed and
+    /// reloads the Home feed as the signed-in user.
+    func youTubeDidSignIn() {
+        isYouTubeSignedIn = true
+        youTubeAccount = YouTubeSession.shared.current?.account
+        if !isStandalone && activeAccount == nil { startStandalone() }
+        Task {
+            await refreshYouTubeAccount()
+            await youtube.loadHome(force: true)
+        }
+    }
+
+    func signOutOfYouTube() {
+        YouTubeSession.shared.signOut()
+        isYouTubeSignedIn = false
+        youTubeAccount = nil
+        Task { await youtube.loadHome(force: true) }
+    }
+
+    func refreshYouTubeAccount() async {
+        guard isYouTubeSignedIn else { return }
+        do {
+            let account = try await YouTubeClient.shared.account()
+            YouTubeSession.shared.setAccount(account)
+            youTubeAccount = account
+        } catch {
+            Log.app.error("YouTube account unavailable: \(error.localizedDescription)")
+        }
     }
 
     private func activateStandalone() {
